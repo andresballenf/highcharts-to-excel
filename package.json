@@ -3,6 +3,14 @@
   "version": "0.0.0",
   "description": "Export Highcharts charts to XLSX workbooks containing native, editable Excel charts linked to worksheet data.",
   "license": "MIT",
+  "author": {
+    "name": "Andrés Ballén",
+    "url": "https://github.com/andresballenf"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/andresballenf"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -68,11 +76,18 @@
     "chart",
     "export",
     "ooxml",
-    "editable"
+    "editable",
+    "chart.js",
+    "spreadsheet",
+    "drawingml"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/andresballenf/highcharts-to-excel"
+    "url": "git+https://github.com/andresballenf/highcharts-to-excel.git"
+  },
+  "homepage": "https://github.com/andresballenf/highcharts-to-excel#readme",
+  "bugs": {
+    "url": "https://github.com/andresballenf/highcharts-to-excel/issues"
   },
   "engines": {
     "node": ">=22"

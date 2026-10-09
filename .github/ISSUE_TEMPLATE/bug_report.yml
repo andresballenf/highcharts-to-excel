@@ -1,0 +1,40 @@
+name: Bug report
+description: Something exports wrongly, throws, or the workbook does not open.
+labels: [bug]
+body:
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: highcharts-editable-excel, Highcharts (or Chart.js), browser or Node, and the spreadsheet application you opened the file with.
+      placeholder: highcharts-editable-excel 0.1.0, Highcharts 13.1.1, Chrome 130, Excel 365 (Windows)
+    validations:
+      required: true
+  - type: textarea
+    id: chart
+    attributes:
+      label: Chart options
+      description: The smallest Highcharts (or Chart.js) configuration that reproduces the problem. A link to a JSFiddle or CodeSandbox is ideal.
+      render: js
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected and what happened
+      description: If the workbook opens but looks wrong, a screenshot of the chart in Highcharts next to the chart in Excel helps a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Warnings and errors
+      description: The `warnings` array of the export result (or the output of `analyzeChartCompatibility`) and any `ExportError` code and message.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I read the compatibility matrix and fidelity limitations in the README and this is not a documented limitation.
+          required: true

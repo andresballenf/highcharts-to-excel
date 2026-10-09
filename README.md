@@ -1,5 +1,10 @@
 # highcharts-editable-excel
 
+[![npm version](https://img.shields.io/npm/v/highcharts-editable-excel.svg)](https://www.npmjs.com/package/highcharts-editable-excel)
+[![CI](https://github.com/andresballenf/highcharts-to-excel/actions/workflows/ci.yml/badge.svg)](https://github.com/andresballenf/highcharts-to-excel/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Sponsor](https://img.shields.io/badge/sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors)](https://github.com/sponsors/andresballenf)
+
 Export live Highcharts charts to `.xlsx` workbooks that contain a **native, editable Excel chart** linked to worksheet cells.
 
 ## Overview
@@ -765,6 +770,19 @@ return loggingWriter.write({ properties: { title: 'Manual' }, sheets: translatio
 | Large charts are slow | All points are written to the sheet and to the chart cache. Use `dataMode: 'rendered'` with data grouping, or fewer points. `result.timings` shows where the time goes (`zipMs` is the compression share of `writeMs`). In browsers the writer yields between chunks and zips in Web Workers. Show `onProgress` in a progress bar and offer cancellation with `signal` (see [Large charts, cancellation and progress](#large-charts-cancellation-and-progress)). Extraction and translation still run as single tasks, and a CSP that forbids `blob:` workers makes the zip synchronous. For measurements, run `pnpm bench`: it prints a table (timings, max tick gap for the main-thread and worker zip paths) and writes `tests/output/bench.json`. Streaming export is on the roadmap. |
 | Vite / CJS errors importing Highcharts modules | Highcharts ships UMD/CJS files without an exports map. Import modules as side effects (`import 'highcharts/modules/exporting'`, not as factories). With Vite, list them in `optimizeDeps.include`, as `demo/vite.config.ts` does. |
 
+## Support the project
+
+`highcharts-editable-excel` is free and MIT-licensed, and will stay that way. It is maintained in the open, and the work that remains (new chart types, Excel fidelity, testing against every Excel build, keeping up with Highcharts and Chart.js releases) is funded by sponsors and donations rather than by a paid tier.
+
+If the library saves you from writing an OOXML chart writer, or if your product ships it, please consider sponsoring:
+
+- **[GitHub Sponsors](https://github.com/sponsors/andresballenf)**: monthly or one-time; the preferred route.
+- `npm fund highcharts-editable-excel` prints the same link from the command line.
+
+Sponsors at a company tier are listed in this README with a logo and link, get priority on bug reports and compatibility requests, and can ask for a chart type or option to move up the fidelity backlog. Open an issue or a discussion to talk about anything else, including support agreements.
+
+Other ways to help: open workbooks from `docs/manual-qa.md` in your copy of Microsoft Excel and report what you see, star the repository, and tell people who export charts for a living that this exists. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Development
 
 ```bash
@@ -846,4 +864,6 @@ Highcharts chart / options
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+[MIT](LICENSE). The bundled zip library (`fflate`) is also MIT; see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+Highcharts is a trademark of Highsoft AS and Chart.js is maintained by the Chart.js contributors. This project is an independent, community-maintained library and is not affiliated with or endorsed by either. Using Highcharts itself requires a license from Highsoft for commercial use; this library does not change that.

@@ -12,3 +12,4 @@ e2e/output/
 tests/unit/_audit_*/
 tools/ooxml-validator/bin/
 tools/ooxml-validator/obj/
+.claude/launch.json

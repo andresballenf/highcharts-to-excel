@@ -1,0 +1,21 @@
+name: Feature request
+description: A chart type, option or styling that should survive the export, or a new API.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What should the export do?
+      description: Describe the Highcharts (or Chart.js) feature and what the editable Excel chart should look like.
+    validations:
+      required: true
+  - type: textarea
+    id: excel
+    attributes:
+      label: Does Excel support it natively?
+      description: If you know how Excel represents this (chart type, option, OOXML element), say so. Features Excel cannot express can only be approximated or reported.
+  - type: textarea
+    id: options
+    attributes:
+      label: Example chart options
+      render: js
