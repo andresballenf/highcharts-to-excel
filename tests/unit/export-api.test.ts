@@ -11,6 +11,7 @@ import {
   exportHighchartsToXlsx,
 } from '../../src/index';
 import type { Diagnostic } from '../../src/types/diagnostics';
+import { resolveExportOptions, type ExportOptions, type MultiChartExportEntry } from '../../src/types/public-api';
 import * as F from '../fixtures/highcharts-options';
 import { inspectXlsx } from '../helpers/inspect-xlsx';
 import { destroyAll, renderChart, type HighchartsLike } from '../helpers/render-chart';
@@ -67,7 +68,10 @@ describe('exportHighchartsToXlsx (Highcharts 13)', () => {
   it('does not mutate the chart options', async () => {
     const chart = render(F.multiLine);
     const before = JSON.stringify(chart.userOptions);
-    await exportHighchartsToXlsx(chart, { themeOverrides: { colors: ['#ff0000'] }, hooks: { transformModel: (m) => ({ ...m }) } });
+    await exportHighchartsToXlsx(chart, {
+      themeOverrides: { colors: ['#ff0000'] },
+      hooks: { transformModel: (m) => ({ ...m }) },
+    });
     expect(JSON.stringify(chart.userOptions)).toBe(before);
   });
 
@@ -85,7 +89,10 @@ describe('exportHighchartsToXlsx (Highcharts 13)', () => {
 
   it('strictMode throws CHART_NOT_EDITABLE for polar and unknown-only charts, not for a plain line chart', async () => {
     await expectExportError(exportHighchartsToXlsx(render(F.polarChart), { strictMode: true }), 'CHART_NOT_EDITABLE');
-    await expectExportError(exportHighchartsToXlsx(render(F.unsupportedType), { strictMode: true }), 'CHART_NOT_EDITABLE');
+    await expectExportError(
+      exportHighchartsToXlsx(render(F.unsupportedType), { strictMode: true }),
+      'CHART_NOT_EDITABLE',
+    );
     const ok = await exportHighchartsToXlsx(render(F.simpleLine), { strictMode: true });
     expect(ok.report.editable).toBe(true);
   });
@@ -101,14 +108,20 @@ describe('exportHighchartsToXlsx (Highcharts 13)', () => {
 
   it('reports theme-override warnings through onWarning', async () => {
     const onWarning = vi.fn();
-    const result = await exportHighchartsToXlsx(render(F.simpleLine), { onWarning, themeOverrides: { chartBackground: 'not-a-color' } });
+    const result = await exportHighchartsToXlsx(render(F.simpleLine), {
+      onWarning,
+      themeOverrides: { chartBackground: 'not-a-color' },
+    });
     const unresolved = result.warnings.filter((d) => d.code === 'UNRESOLVED_COLOR');
     expect(unresolved).toHaveLength(1);
     expect(onWarning).toHaveBeenCalledWith(unresolved[0]);
   });
 
   it('includeReferenceImage outside a browser reports WRITER_LIMITATION and still exports', async () => {
-    const result = await exportHighchartsToXlsx(render(F.simpleLine), { includeReferenceImage: true, strictMode: true });
+    const result = await exportHighchartsToXlsx(render(F.simpleLine), {
+      includeReferenceImage: true,
+      strictMode: true,
+    });
     const d = result.warnings.find((w) => w.code === 'WRITER_LIMITATION');
     expect(d?.message).toMatch(/requires a browser/);
     expect((await inspectXlsx(result.bytes)).hasImages()).toBe(false);
@@ -117,7 +130,9 @@ describe('exportHighchartsToXlsx (Highcharts 13)', () => {
   it('hooks.transformModel can rename a series (data sheet header changes)', async () => {
     const chart = render(F.simpleLine);
     const result = await exportHighchartsToXlsx(chart, {
-      hooks: { transformModel: (m) => ({ ...m, series: m.series.map((s, i) => (i === 0 ? { ...s, name: 'Renamed' } : s)) }) },
+      hooks: {
+        transformModel: (m) => ({ ...m, series: m.series.map((s, i) => (i === 0 ? { ...s, name: 'Renamed' } : s)) }),
+      },
     });
     const x = await inspectXlsx(result.bytes);
     const data = x.sheetPath('Data');
@@ -127,10 +142,13 @@ describe('exportHighchartsToXlsx (Highcharts 13)', () => {
 
   it('wraps unknown writer failures in WRITER_FAILURE', async () => {
     const writer = await import('../../src/excel/ooxml-writer');
-    const spy = vi.spyOn(writer.OoxmlExcelWriter.prototype, 'write').mockRejectedValueOnce(new Error('disk full'));
+    // Restored automatically before the next test (vitest.config.ts: restoreMocks).
+    vi.spyOn(writer.OoxmlExcelWriter.prototype, 'write').mockRejectedValueOnce(new Error('disk full'));
     const error = await expectExportError(exportHighchartsToXlsx(render(F.simpleLine)), 'WRITER_FAILURE');
-    expect((error.details.cause as Error).message).toBe('disk full');
-    spy.mockRestore();
+    expect((error.cause as Error).message).toBe('disk full');
+    // A11: the cause lives on Error#cause (non-enumerable), not duplicated in details or own keys.
+    expect(error.details).not.toHaveProperty('cause');
+    expect(Object.keys(error)).not.toContain('cause');
   });
 });
 
@@ -216,5 +234,118 @@ describe('exportChartsToWorkbook (Highcharts 13)', () => {
       'CHART_NOT_EDITABLE',
     );
     expect(error.message).toContain('entry 1');
+  });
+
+  it('A5 checks blocking before rendering the reference image (multi-chart path)', async () => {
+    const onWarning = vi.fn();
+    await expectExportError(
+      exportChartsToWorkbook([{ chart: render(F.polarChart), options: { includeReferenceImage: true, onWarning } }]),
+      'CHART_NOT_EDITABLE',
+    );
+    expect(onWarning.mock.calls.map(([d]) => (d as Diagnostic).code)).not.toContain('WRITER_LIMITATION');
+  });
+
+  it('A6 entry options cannot carry a writer or includeModel (type level)', () => {
+    const writer = { name: 'test-writer', write: async () => new Uint8Array() };
+    // @ts-expect-error the writer is workbook-wide: pass it in exportChartsToWorkbook's second argument
+    const a: MultiChartExportEntry = { chart: null, options: { writer } };
+    // @ts-expect-error includeModel has no per-entry result to attach to
+    const b: MultiChartExportEntry = { chart: null, options: { includeModel: true } };
+    expect([a, b]).toHaveLength(2);
+  });
+});
+
+describe('export pipeline audit fixes (Highcharts 13)', () => {
+  afterEach(() => destroyAll());
+
+  it('A3 yields to the event loop between phases in a browser-like environment', async () => {
+    const order: string[] = [];
+    const chart = render(F.simpleLine);
+    setTimeout(() => order.push('timer'), 0);
+    await exportHighchartsToXlsx(chart);
+    order.push('done');
+    expect(order).toEqual(['timer', 'done']);
+  });
+
+  it('A5 checks blocking before rendering the reference image and times the image separately', async () => {
+    const onWarning = vi.fn();
+    await expectExportError(
+      exportHighchartsToXlsx(render(F.polarChart), { includeReferenceImage: true, onWarning }),
+      'CHART_NOT_EDITABLE',
+    );
+    expect(onWarning.mock.calls.map(([d]) => (d as Diagnostic).code)).not.toContain('WRITER_LIMITATION');
+    const plain = await exportHighchartsToXlsx(render(F.simpleLine));
+    expect(plain.timings.imageMs).toBe(0);
+    const withImage = await exportHighchartsToXlsx(render(F.simpleLine), { includeReferenceImage: true });
+    expect(typeof withImage.timings.imageMs).toBe('number');
+    expect(withImage.warnings.some((w) => w.code === 'WRITER_LIMITATION')).toBe(true);
+  });
+});
+
+describe('resolveExportOptions validation (A2)', () => {
+  const writer = { name: 'test-writer', write: async () => new Uint8Array() };
+
+  it.each([
+    ['fidelity', { fidelity: 'max' }],
+    ['dataMode', { dataMode: 'all' }],
+    ['seriesVisibility', { seriesVisibility: 'hidden' }],
+    ['chartWidth', { chartWidth: '800' }],
+    ['chartWidth', { chartWidth: 10 }],
+    ['chartHeight', { chartHeight: Number.NaN }],
+    ['chartHeight', { chartHeight: 30_000 }],
+    ['chartSheetName', { chartSheetName: 5 }],
+    ['dataSheetName', { dataSheetName: null }],
+    ['filename', { filename: 42 }],
+    ['onWarning', { onWarning: 'log' }],
+    ['hooks', { hooks: 'nope' }],
+    ['hooks.transformModel', { hooks: { transformModel: 1 } }],
+    ['writer', { writer: {} }],
+  ])('rejects an invalid %s', (name, bad) => {
+    let error: unknown;
+    try {
+      resolveExportOptions(bad as unknown as ExportOptions);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ExportError);
+    expect((error as ExportError).code).toBe('INVALID_OPTIONS');
+    expect((error as ExportError).message).toContain(name);
+    expect((error as ExportError).details.property).toBe(name);
+  });
+
+  it('rejects a non-object options argument', () => {
+    expect(() => resolveExportOptions(42 as unknown as ExportOptions)).toThrow(
+      expect.objectContaining({ code: 'INVALID_OPTIONS' }),
+    );
+  });
+
+  it('accepts valid options and the documented bounds', () => {
+    expect(() =>
+      resolveExportOptions({
+        fidelity: 'minimal',
+        dataMode: 'raw',
+        seriesVisibility: 'all',
+        chartWidth: 50,
+        chartHeight: 20_000,
+        chartSheetName: 'C',
+        dataSheetName: 'D',
+        filename: 'f',
+        onWarning: () => undefined,
+        hooks: { transformModel: (m) => m },
+        writer,
+      }),
+    ).not.toThrow();
+    expect(resolveExportOptions().fidelity).toBe('best-effort');
+  });
+
+  it('export entry points reject invalid options with INVALID_OPTIONS', async () => {
+    await expectExportError(
+      exportHighchartsOptionsToXlsx(F.simpleLine, { chartWidth: '800' as unknown as number }),
+      'INVALID_OPTIONS',
+    );
+    await expectExportError(
+      exportChartsToWorkbook([{ chart: null }], { writer: {} as unknown as typeof writer }),
+      'INVALID_OPTIONS',
+    );
   });
 });

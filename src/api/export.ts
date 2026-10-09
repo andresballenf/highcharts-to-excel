@@ -7,7 +7,12 @@
  */
 
 import type { ChartModel } from '../types/chart-model';
-import { DiagnosticCollector, buildCompatibilityReport, type CompatibilityReport, type Diagnostic } from '../types/diagnostics';
+import {
+  DiagnosticCollector,
+  buildCompatibilityReport,
+  type CompatibilityReport,
+  type Diagnostic,
+} from '../types/diagnostics';
 import {
   ExportError,
   XLSX_MIME_TYPE,
@@ -25,7 +30,12 @@ import { getHighchartsVersion } from '../highcharts/guards';
 import { applyThemeOverrides } from '../core/theme-overrides';
 import { translateChartModel, type TranslationResult } from '../core/translate-chart';
 import { sanitizeFilename } from '../utils/filenames';
-import { REFERENCE_IMAGE_PROPERTY, renderReferenceImage, reportReferenceImageUnavailable, type ReferenceImage } from '../browser/reference-image';
+import {
+  REFERENCE_IMAGE_PROPERTY,
+  renderReferenceImage,
+  reportReferenceImageUnavailable,
+  type ReferenceImage,
+} from '../browser/reference-image';
 
 type ResolvedOptions = ReturnType<typeof resolveExportOptions>;
 
@@ -70,6 +80,15 @@ function mergeWarnings(...lists: ReadonlyArray<readonly Diagnostic[]>): Diagnost
   return out;
 }
 
+/**
+ * Lets the browser paint (e.g. a spinner) between the synchronous phases. A macrotask, only where
+ * there is a `window`; Node and workers are not slowed down.
+ */
+function yieldToEventLoop(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function describe(list: readonly Diagnostic[]): string {
   return list.map((d) => `${d.code} at ${d.property}: ${d.message}`).join('; ');
 }
@@ -86,12 +105,17 @@ function prepareModel(source: Source, resolved: ResolvedOptions, collector: Diag
   let model =
     source.kind === 'chart'
       ? extractChartModel(source.chart, { ...extract, highchartsVersion: getHighchartsVersion(source.chart) })
-      : extractChartModelFromOptions(source.options, { ...extract, highchartsVersion: getHighchartsVersion(undefined) });
+      : extractChartModelFromOptions(source.options, {
+          ...extract,
+          highchartsVersion: getHighchartsVersion(undefined),
+        });
   const transform = resolved.hooks?.transformModel;
   if (transform) {
     const transformed = transform(model);
     if (transformed === null || typeof transformed !== 'object' || !Array.isArray((transformed as ChartModel).series)) {
-      throw new ExportError('INVALID_OPTIONS', 'hooks.transformModel must return a ChartModel.', { chartId: model.meta.chartId });
+      throw new ExportError('INVALID_OPTIONS', 'hooks.transformModel must return a ChartModel.', {
+        chartId: model.meta.chartId,
+      });
     }
     model = transformed;
   }
@@ -120,7 +144,12 @@ function translatePrepared(
     takenSheetNames,
   });
   const warnings = mergeWarnings(model.warnings, collector.items);
-  const report = buildCompatibilityReport(model.meta.sourceChartType, translation.excelChartType, warnings, translation.supportedProperties);
+  const report = buildCompatibilityReport(
+    model.meta.sourceChartType,
+    translation.excelChartType,
+    warnings,
+    translation.supportedProperties,
+  );
   return { ...prepared, translation, warnings, report };
 }
 
@@ -140,7 +169,10 @@ function enforceEditable(t: Translated, strictMode: boolean, label: string): voi
   }
   if (!strictMode) return;
   const losses = t.warnings.filter(
-    (d) => d.outcome === 'unsupported' && (d.severity === 'warning' || d.severity === 'error') && d.property !== REFERENCE_IMAGE_PROPERTY,
+    (d) =>
+      d.outcome === 'unsupported' &&
+      (d.severity === 'warning' || d.severity === 'error') &&
+      d.property !== REFERENCE_IMAGE_PROPERTY,
   );
   if (losses.length > 0) {
     throw new ExportError('CHART_NOT_EDITABLE', `strictMode: ${label} has unsupported features: ${describe(losses)}`, {
@@ -155,19 +187,59 @@ async function writeWorkbook(spec: WorkbookSpec, writer?: ExcelWriter): Promise<
     return await (writer ?? createDefaultExcelWriter()).write(spec);
   } catch (error) {
     if (error instanceof ExportError) throw error;
-    throw new ExportError('WRITER_FAILURE', `Writing the XLSX package failed: ${error instanceof Error ? error.message : String(error)}`, {
-      cause: error,
-    });
+    throw new ExportError(
+      'WRITER_FAILURE',
+      `Writing the XLSX package failed: ${error instanceof Error ? error.message : String(error)}`,
+      {},
+      { cause: error },
+    );
   }
 }
 
-async function referenceImageFor(source: Source, model: ChartModel, resolved: ResolvedOptions, collector: DiagnosticCollector): Promise<ReferenceImage | null> {
+async function referenceImageFor(
+  source: Source,
+  model: ChartModel,
+  resolved: ResolvedOptions,
+  collector: DiagnosticCollector,
+): Promise<ReferenceImage | null> {
   if (!resolved.includeReferenceImage) return null;
   if (source.kind === 'options') {
     reportReferenceImageUnavailable(collector, 'the reference image requires a browser and a rendered chart.', 'info');
     return null;
   }
-  return renderReferenceImage(source.chart, resolved.chartWidth ?? model.width, resolved.chartHeight ?? model.height, collector);
+  return renderReferenceImage(
+    source.chart,
+    resolved.chartWidth ?? model.width,
+    resolved.chartHeight ?? model.height,
+    collector,
+  );
+}
+
+/**
+ * Translates, enforces editability, and only then renders the optional reference image (a blocked
+ * chart never pays for it). With an image the chart is translated again so the sheet carries it.
+ */
+async function translateWithImage(
+  source: Source,
+  prepared: Prepared,
+  resolved: ResolvedOptions,
+  taken: ReadonlySet<string>,
+  label: string,
+): Promise<{ translated: Translated; translateMs: number; imageMs: number }> {
+  let t = now();
+  let translated = translatePrepared(prepared, resolved, taken, null);
+  let translateMs = elapsed(t);
+  enforceEditable(translated, resolved.strictMode, label);
+  if (!resolved.includeReferenceImage) return { translated, translateMs, imageMs: 0 };
+
+  t = now();
+  const image = await referenceImageFor(source, prepared.model, resolved, prepared.collector);
+  const imageMs = elapsed(t);
+  t = now();
+  translated = translatePrepared(prepared, resolved, taken, image);
+  translateMs += elapsed(t);
+  enforceEditable(translated, resolved.strictMode, label);
+  return { translated, translateMs, imageMs };
 }
 
 async function runSingle(source: Source, options: ExportOptions | undefined): Promise<ExportResult> {
@@ -177,23 +249,30 @@ async function runSingle(source: Source, options: ExportOptions | undefined): Pr
 
   const tExtract = now();
   const prepared = prepareModel(source, resolved, collector);
-  const image = await referenceImageFor(source, prepared.model, resolved, collector);
   const extractMs = elapsed(tExtract);
+  await yieldToEventLoop();
 
-  const tTranslate = now();
-  const translated = translatePrepared(prepared, resolved, new Set<string>(), image);
-  const translateMs = elapsed(tTranslate);
-  enforceEditable(translated, resolved.strictMode, 'The chart');
+  const { translated, translateMs, imageMs } = await translateWithImage(
+    source,
+    prepared,
+    resolved,
+    new Set<string>(),
+    'The chart',
+  );
+  await yieldToEventLoop();
 
   const { model } = translated;
   const tWrite = now();
-  const bytes = await writeWorkbook({
-    properties: {
-      title: resolved.properties?.title ?? (model.title?.text || undefined),
-      creator: resolved.properties?.creator ?? CREATOR,
+  const bytes = await writeWorkbook(
+    {
+      properties: {
+        title: resolved.properties?.title ?? (model.title?.text || undefined),
+        creator: resolved.properties?.creator ?? CREATOR,
+      },
+      sheets: translated.translation.sheets,
     },
-    sheets: translated.translation.sheets,
-  }, resolved.writer);
+    resolved.writer,
+  );
   const writeMs = elapsed(tWrite);
 
   const result: ExportResult = {
@@ -202,7 +281,7 @@ async function runSingle(source: Source, options: ExportOptions | undefined): Pr
     mimeType: XLSX_MIME_TYPE,
     warnings: translated.warnings,
     report: translated.report,
-    timings: { extractMs, translateMs, writeMs, totalMs: elapsed(t0) },
+    timings: { extractMs, translateMs, writeMs, imageMs, totalMs: elapsed(t0) },
   };
   if (resolved.includeModel) result.model = model;
   return result;
@@ -212,8 +291,14 @@ async function runSingle(source: Source, options: ExportOptions | undefined): Pr
  * Exports a rendered Highcharts chart to an XLSX workbook (chart sheet + data sheet) containing a
  * native Excel chart that references the worksheet cells. Never triggers a download.
  *
- * @throws ExportError INVALID_CHART for non-charts; CHART_NOT_EDITABLE when no native chart can be
- *   produced (or, with `strictMode`, when any feature is dropped); WRITER_FAILURE on writer errors.
+ * In a browser the export yields to the event loop between the extract, translate and write
+ * phases so the page can repaint (e.g. a spinner); each phase itself is synchronous.
+ *
+ * @throws ExportError INVALID_OPTIONS for invalid options; INVALID_CHART for non-charts;
+ *   CHART_NOT_EDITABLE when no native chart can be produced (or, with `strictMode`, when any
+ *   feature is dropped); WRITER_FAILURE on writer errors (the writer's error is `error.cause`).
+ *   Errors thrown by your own callbacks (`onWarning`, `hooks.transformModel`) propagate unwrapped,
+ *   as thrown.
  */
 export async function exportHighchartsToXlsx(chart: unknown, options?: ExportOptions): Promise<ExportResult> {
   return runSingle({ kind: 'chart', chart }, options);
@@ -223,13 +308,19 @@ export async function exportHighchartsToXlsx(chart: unknown, options?: ExportOpt
  * Server-side / headless variant: exports from a plain Highcharts options object without rendering.
  * Uses the raw `series[i].data` and Highcharts' default styles where the options do not specify them.
  */
-export async function exportHighchartsOptionsToXlsx(highchartsOptions: object, options?: ExportOptions): Promise<ExportResult> {
+export async function exportHighchartsOptionsToXlsx(
+  highchartsOptions: object,
+  options?: ExportOptions,
+): Promise<ExportResult> {
   return runSingle({ kind: 'options', options: highchartsOptions }, options);
 }
 
 /**
  * Synchronous dry run: extracts and translates the chart without writing a workbook and returns
- * the compatibility report. Blocked charts return `editable: false`; only INVALID_CHART throws.
+ * the compatibility report. Blocked charts return `editable: false` instead of throwing.
+ *
+ * @throws ExportError INVALID_CHART for non-charts; INVALID_OPTIONS for invalid options. Errors
+ *   thrown by `onWarning` or `hooks.transformModel` propagate unwrapped.
  */
 export function analyzeChartCompatibility(chart: unknown, options?: ExportOptions): CompatibilityReport {
   const resolved = resolveExportOptions(options);
@@ -242,15 +333,33 @@ export function analyzeChartCompatibility(chart: unknown, options?: ExportOption
  * Exports several charts into one workbook. Each chart gets its own chart/data sheet pair
  * (default names "Chart 1"/"Data 1", "Chart 2"/"Data 2", …).
  *
- * @throws ExportError CHART_NOT_EDITABLE naming the entry index when a chart cannot be exported.
+ * An entry's `strictMode` overrides the workbook-wide `strictMode`. The reference image, when an
+ * entry asks for one, is rendered only after that entry is known to be exportable.
+ *
+ * @throws ExportError CHART_NOT_EDITABLE naming the entry index when a chart cannot be exported;
+ *   INVALID_OPTIONS for invalid entries or options. Errors thrown by your own callbacks propagate
+ *   unwrapped.
  */
 export async function exportChartsToWorkbook(
   entries: MultiChartExportEntry[],
-  options: { filename?: string; properties?: ExportOptions['properties']; strictMode?: boolean; writer?: ExcelWriter } = {},
+  options: {
+    filename?: string;
+    properties?: ExportOptions['properties'];
+    strictMode?: boolean;
+    writer?: ExcelWriter;
+  } = {},
 ): Promise<MultiChartExportResult> {
   if (!Array.isArray(entries) || entries.length === 0) {
-    throw new ExportError('INVALID_OPTIONS', 'exportChartsToWorkbook expects a non-empty array of { chart, options } entries.');
+    throw new ExportError(
+      'INVALID_OPTIONS',
+      'exportChartsToWorkbook expects a non-empty array of { chart, options } entries.',
+    );
   }
+  // Workbook-level options are validated up front, before any chart work.
+  resolveExportOptions({
+    ...(options.filename !== undefined ? { filename: options.filename } : {}),
+    ...(options.writer !== undefined ? { writer: options.writer } : {}),
+  });
   const taken = new Set<string>();
   const sheets: SheetSpec[] = [];
   const charts: MultiChartExportResult['charts'] = [];
@@ -275,13 +384,12 @@ export async function exportChartsToWorkbook(
       prepared = prepareModel(source, resolved, collector);
     } catch (error) {
       if (error instanceof ExportError && error.code === 'INVALID_CHART') {
-        throw new ExportError('INVALID_CHART', `Entry ${i}: ${error.message}`, { ...error.details, cause: error });
+        throw new ExportError('INVALID_CHART', `Entry ${i}: ${error.message}`, { ...error.details }, { cause: error });
       }
       throw error;
     }
-    const image = await referenceImageFor(source, prepared.model, resolved, collector);
-    const translated = translatePrepared(prepared, resolved, taken, image);
-    enforceEditable(translated, resolved.strictMode, `Chart entry ${i}`);
+    await yieldToEventLoop();
+    const { translated } = await translateWithImage(source, prepared, resolved, taken, `Chart entry ${i}`);
     const { translation } = translated;
     taken.add(translation.chartSheetName);
     taken.add(translation.dataSheetName);
@@ -294,10 +402,14 @@ export async function exportChartsToWorkbook(
     });
     firstTitle ??= translated.model.title?.text || undefined;
   }
+  await yieldToEventLoop();
 
-  const bytes = await writeWorkbook({
-    properties: { title: options.properties?.title ?? firstTitle, creator: options.properties?.creator ?? CREATOR },
-    sheets,
-  }, options.writer);
+  const bytes = await writeWorkbook(
+    {
+      properties: { title: options.properties?.title ?? firstTitle, creator: options.properties?.creator ?? CREATOR },
+      sheets,
+    },
+    options.writer,
+  );
   return { bytes, filename: sanitizeFilename(options.filename ?? 'charts'), mimeType: XLSX_MIME_TYPE, charts };
 }

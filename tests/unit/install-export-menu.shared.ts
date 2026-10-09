@@ -5,11 +5,18 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installHighchartsExcelExport, addEditableExcelMenuItem } from '../../src/highcharts/install-export-menu';
-import { DEFAULT_MENU_ITEM_KEY, DEFAULT_MENU_TEXT, ExportError, type ExportResult, type Installation } from '../../src/types/public-api';
+import {
+  DEFAULT_MENU_ITEM_KEY,
+  DEFAULT_MENU_TEXT,
+  ExportError,
+  type ExportResult,
+  type Installation,
+} from '../../src/types/public-api';
 import * as F from '../fixtures/highcharts-options';
 import { destroyAll, renderChart, type HighchartsLike } from '../helpers/render-chart';
 
-type AnyRec = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: tests read live Highcharts internals that the public types omit
+type AnyRec = any;
 
 export interface HighchartsNamespace extends HighchartsLike {
   getOptions(): AnyRec;
@@ -49,12 +56,19 @@ export function runInstallSuite(H: HighchartsNamespace, label: string): void {
   describe(`installHighchartsExcelExport (${label})`, () => {
     let installation: Installation | null = null;
     let originalItems: unknown[];
-    const install = (...args: Parameters<typeof installHighchartsExcelExport> extends [unknown, ...infer R] ? R : never): Installation =>
-      (installation = installHighchartsExcelExport(H, ...args));
+    const install = (
+      ...args: Parameters<typeof installHighchartsExcelExport> extends [unknown, ...infer R] ? R : never
+    ): Installation => (installation = installHighchartsExcelExport(H, ...args));
 
     beforeEach(() => {
       originalItems = globalItems(H);
-      vi.stubGlobal('URL', Object.assign(Object.create(URL) as object, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() }));
+      vi.stubGlobal(
+        'URL',
+        Object.assign(Object.create(URL) as object, {
+          createObjectURL: vi.fn(() => 'blob:x'),
+          revokeObjectURL: vi.fn(),
+        }),
+      );
       vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     });
 
@@ -84,7 +98,9 @@ export function runInstallSuite(H: HighchartsNamespace, label: string): void {
       const after = globalItems(H);
       expect(after.filter((i) => i !== KEY)).toEqual(before);
       // Inserted after the last of downloadXLS / downloadCSV / downloadSVG.
-      const anchor = ['downloadXLS', 'downloadCSV', 'downloadSVG'].map((k) => before.indexOf(k)).reduce((m, i) => Math.max(m, i), -1);
+      const anchor = ['downloadXLS', 'downloadCSV', 'downloadSVG']
+        .map((k) => before.indexOf(k))
+        .reduce((m, i) => Math.max(m, i), -1);
       expect(after.indexOf(KEY)).toBe(anchor >= 0 ? anchor + 1 : after.length - 1);
     });
 
@@ -131,7 +147,10 @@ export function runInstallSuite(H: HighchartsNamespace, label: string): void {
 
     it('per-chart enabled:false removes the key for that chart only', () => {
       install();
-      const disabled = renderChart(H, { ...F.simpleLine, exporting: { editableExcel: { enabled: false } } as AnyRec }) as AnyRec;
+      const disabled = renderChart(H, {
+        ...F.simpleLine,
+        exporting: { editableExcel: { enabled: false } } as AnyRec,
+      }) as AnyRec;
       expect(chartItems(disabled)).not.toContain(KEY);
       expect(chartItems(disabled)).toEqual(globalItems(H).filter((i) => i !== KEY));
       const next = renderChart(H, F.simpleLine) as AnyRec;
@@ -141,7 +160,10 @@ export function runInstallSuite(H: HighchartsNamespace, label: string): void {
 
     it('per-chart menuText is applied without changing the global text', () => {
       install();
-      const chart = renderChart(H, { ...F.simpleLine, exporting: { editableExcel: { menuText: 'Excel (editable)' } } as AnyRec }) as AnyRec;
+      const chart = renderChart(H, {
+        ...F.simpleLine,
+        exporting: { editableExcel: { menuText: 'Excel (editable)' } } as AnyRec,
+      }) as AnyRec;
       expect(chart.options.exporting.menuItemDefinitions[KEY].text).toBe('Excel (editable)');
       expect(typeof chart.options.exporting.menuItemDefinitions[KEY].onclick).toBe('function');
       expect(definition(H).text).toBe(DEFAULT_MENU_TEXT);
@@ -150,10 +172,20 @@ export function runInstallSuite(H: HighchartsNamespace, label: string): void {
     it('appends the key to explicit per-chart menuItems without mutating the caller array', () => {
       install();
       const own = ['downloadPNG', 'printChart'];
-      const userOptions = { ...F.simpleLine, accessibility: { enabled: false }, exporting: { buttons: { contextButton: { menuItems: own } } } };
+      const userOptions = {
+        ...F.simpleLine,
+        accessibility: { enabled: false },
+        exporting: { buttons: { contextButton: { menuItems: own } } },
+      };
       const chart = (H as AnyRec).chart(document.body.appendChild(document.createElement('div')), userOptions);
       expect(chartItems(chart)).toEqual(['downloadPNG', 'printChart', KEY]);
       expect(own).toEqual(['downloadPNG', 'printChart']);
+      // The exporting module renders the context button from the options object it captured at init
+      // (`chart.exporting.options` in v12+); that object must carry the item too, or the browser menu
+      // never shows it even though `chart.options` does (regression caught by the Playwright suite).
+      const captured = chart.exporting?.options ?? chart.options.exporting;
+      expect(captured.buttons.contextButton.menuItems).toContain(KEY);
+      expect(captured).toBe(chart.options.exporting);
       chart.destroy();
     });
 
@@ -174,10 +206,13 @@ export function runInstallSuite(H: HighchartsNamespace, label: string): void {
     it('per-chart editableExcel export options override install defaults', async () => {
       const s = settle();
       install({ onExport: s.onExport, onError: s.onError, exportOptions: { filename: 'from-install' } });
-      const chart = renderChart(H, { ...F.simpleLine, exporting: { editableExcel: { filename: 'per-chart' } } as AnyRec }) as AnyRec;
+      const chart = renderChart(H, {
+        ...F.simpleLine,
+        exporting: { editableExcel: { filename: 'per-chart' } } as AnyRec,
+      }) as AnyRec;
       chart.options.exporting.menuItemDefinitions[KEY].onclick.call(chart);
       await s.done;
-      expect((s.onExport.mock.calls[0]?.[0] as ExportResult).filename).toBe('per-chart.xlsx');
+      expect((s.onExport.mock.calls[0]![0] as ExportResult).filename).toBe('per-chart.xlsx');
     });
 
     it('routes a polar-chart failure to onError as an ExportError', async () => {
@@ -209,7 +244,10 @@ export function runInstallSuite(H: HighchartsNamespace, label: string): void {
       installation = null;
       expect(globalItems(H)).toBe(before);
       expect(H.getOptions().exporting.menuItemDefinitions[KEY]).toBeUndefined();
-      const plain = renderChart(H, { ...F.simpleLine, exporting: { editableExcel: { menuText: 'x' } } as AnyRec }) as AnyRec;
+      const plain = renderChart(H, {
+        ...F.simpleLine,
+        exporting: { editableExcel: { menuText: 'x' } } as AnyRec,
+      }) as AnyRec;
       expect(chartItems(plain)).not.toContain(KEY);
       expect(plain.options.exporting.menuItemDefinitions[KEY]).toBeUndefined();
 
@@ -250,13 +288,115 @@ export function runInstallSuite(H: HighchartsNamespace, label: string): void {
         },
         Chart: function Chart() {},
       };
-      expect(() => installHighchartsExcelExport(fake)).toThrow(expect.objectContaining({ code: 'EXPORTING_MODULE_MISSING' }));
+      expect(() => installHighchartsExcelExport(fake)).toThrow(
+        expect.objectContaining({ code: 'EXPORTING_MODULE_MISSING' }),
+      );
     });
 
     it('throws INVALID_OPTIONS for a non-Highcharts argument', () => {
       for (const bad of [undefined, null, 42, {}, { getOptions() {} }]) {
         expect(() => installHighchartsExcelExport(bad)).toThrow(expect.objectContaining({ code: 'INVALID_OPTIONS' }));
       }
+    });
+
+    const directChart = (options: AnyRec): AnyRec => {
+      const container = document.body.appendChild(document.createElement('div'));
+      return (H as AnyRec).chart(container, options);
+    };
+
+    it('E2 frozen options still render after install and keep their per-chart settings', () => {
+      install();
+      const exporting = Object.freeze({ editableExcel: Object.freeze({ menuText: 'Frozen text' }) });
+      const frozen = Object.freeze({
+        accessibility: Object.freeze({ enabled: false }),
+        series: [{ type: 'line', data: [1, 2] }],
+        exporting,
+      });
+      const chart = directChart(frozen);
+      expect(frozen.exporting).toBe(exporting);
+      expect(count(chartItems(chart), KEY)).toBe(1);
+      expect(chart.options.exporting.menuItemDefinitions[KEY].text).toBe('Frozen text');
+      chart.destroy();
+    });
+
+    it('E2 never assigns into the caller options (reused objects stay identical)', () => {
+      install();
+      const own = ['downloadPNG'];
+      const exporting = { editableExcel: { menuText: 'Shared' }, buttons: { contextButton: { menuItems: own } } };
+      const shared = { accessibility: { enabled: false }, series: [{ type: 'line', data: [1, 2] }], exporting };
+      const snapshot = JSON.stringify(shared);
+      const a = directChart(shared);
+      const b = directChart(shared);
+      expect(shared.exporting).toBe(exporting);
+      expect(JSON.stringify(shared)).toBe(snapshot);
+      expect(Object.keys(shared)).toEqual(['accessibility', 'series', 'exporting']);
+      for (const c of [a, b]) {
+        expect(chartItems(c)).toEqual(['downloadPNG', KEY]);
+        expect(c.options.exporting.menuItemDefinitions[KEY].text).toBe('Shared');
+        expect(c.userOptions.exporting.buttons.contextButton.menuItems).toEqual(['downloadPNG', KEY]);
+      }
+      const disabled = directChart({ ...shared, exporting: { editableExcel: { enabled: false } } });
+      expect(chartItems(disabled)).not.toContain(KEY);
+      for (const c of [a, b, disabled]) c.destroy();
+    });
+
+    it('A1 a throwing onExport reaches onError', async () => {
+      const errors: unknown[] = [];
+      let resolve!: () => void;
+      const done = new Promise<void>((r) => (resolve = r));
+      install({
+        onExport: () => {
+          throw new Error('onExport failed');
+        },
+        onError: (e) => {
+          errors.push(e);
+          resolve();
+        },
+      });
+      const chart = renderChart(H, F.simpleLine) as AnyRec;
+      definition(H).onclick.call(chart);
+      await done;
+      expect((errors[0] as Error).message).toBe('onExport failed');
+    });
+
+    it('A1 a throwing onError is logged, never an unhandled rejection', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown): void => {
+        unhandled.push(reason);
+      };
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        install({
+          onError: () => {
+            throw new Error('onError failed');
+          },
+        });
+        const chart = renderChart(H, F.polarChart) as AnyRec;
+        definition(H).onclick.call(chart);
+        await vi.waitFor(() =>
+          expect(spy.mock.calls.flat().some((a) => a instanceof Error && a.message === 'onError failed')).toBe(true),
+        );
+        await new Promise((r) => setTimeout(r, 20));
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
+    });
+
+    it('A1 ignores a second click while an export of the same chart is running', async () => {
+      const s = settle();
+      install({ onExport: s.onExport, onError: s.onError });
+      const chart = renderChart(H, F.simpleLine) as AnyRec;
+      const click = (): void => definition(H).onclick.call(chart);
+      click();
+      click();
+      await s.done;
+      await new Promise((r) => setTimeout(r, 50));
+      expect(s.onExport).toHaveBeenCalledTimes(1);
+      expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1);
+      click();
+      await vi.waitFor(() => expect(s.onExport).toHaveBeenCalledTimes(2));
     });
   });
 }

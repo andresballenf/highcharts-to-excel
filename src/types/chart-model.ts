@@ -74,7 +74,7 @@ export interface TextBlock {
  * used a formatter the library cannot (and must not) execute.
  */
 export type NumberFormat =
-  | { kind: 'excel'; code: string; /** e.g. "{value}%" */ source?: string }
+  | { kind: 'excel'; code: string /** e.g. "{value}%" */; source?: string }
   | { kind: 'unsupported'; reason: string; source?: string };
 
 export type MarkerSymbol = 'circle' | 'square' | 'diamond' | 'triangle' | 'triangle-down' | 'none' | 'other';
@@ -89,7 +89,17 @@ export interface MarkerStyle {
   strokeWidth: number;
 }
 
-export type DataLabelPosition = 'auto' | 'center' | 'insideEnd' | 'insideBase' | 'outsideEnd' | 'above' | 'below' | 'left' | 'right' | 'bestFit';
+export type DataLabelPosition =
+  | 'auto'
+  | 'center'
+  | 'insideEnd'
+  | 'insideBase'
+  | 'outsideEnd'
+  | 'above'
+  | 'below'
+  | 'left'
+  | 'right'
+  | 'bestFit';
 
 export interface DataLabelStyle {
   enabled: boolean;
@@ -153,6 +163,8 @@ export interface SeriesModel {
   /** Original source type string, e.g. "areaspline", "treemap". */
   sourceType: string;
   visible: boolean;
+  /** False when the source hides this series from its legend (Highcharts `showInLegend: false`). */
+  showInLegend: boolean;
   xAxisIndex: number;
   yAxisIndex: number;
   color: Color | null;
@@ -236,7 +248,15 @@ export interface AxisModel {
   dateFormat: string | null;
 }
 
-export type LegendPosition = 'top' | 'bottom' | 'left' | 'right' | 'topRight' | 'topLeft' | 'bottomRight' | 'bottomLeft';
+export type LegendPosition =
+  | 'top'
+  | 'bottom'
+  | 'left'
+  | 'right'
+  | 'topRight'
+  | 'topLeft'
+  | 'bottomRight'
+  | 'bottomLeft';
 
 export interface LegendModel {
   enabled: boolean;
@@ -260,6 +280,12 @@ export interface PlotAreaModel {
 export interface ChartMeta {
   sourceLibrary: 'highcharts';
   sourceVersion: string | null;
+  /**
+   * Offset, in minutes, that was ADDED to every datetime x value so that Excel shows the same
+   * wall-clock time the source displayed (Highcharts `time.timezone` / `useUTC:false`). 0 for UTC.
+   * Null when the source timezone could not be determined.
+   */
+  datetimeOffsetMinutes: number | null;
   /** Default chart type from options (chart.type) or first series type. */
   sourceChartType: string;
   /** How styles were obtained. */

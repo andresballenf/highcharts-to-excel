@@ -76,6 +76,10 @@ Copy this table into the release notes or the pull request.
 
 Use ✅ / ❌ and put details in the notes column. File an issue for every ❌ with the workbook attached.
 
-## 4. LibreOffice renders are only a smoke check
+## 4. OOXML schema validation (optional)
+
+`pnpm validate:xsd` (after `pnpm test`) runs `scripts/validate-ooxml.py` on `tests/output/export/v13/*.xlsx` and `tests/output/writer/*.xlsx`. It needs Python with `lxml` and the ECMA-376 schemas, which this repository does not ship: download ECMA-376 Part 1/4 schemas from ecma-international.org and set `OOXML_SCHEMA_DIR` to a folder containing `ISO-IEC29500-4_2016/*.xsd` and `ecma/fouth-edition/opc-*.xsd`. It catches element-order and type errors that make Excel repair or drop a chart, but a schema-valid file is still not proof that Excel opens it correctly: the checklist above is.
+
+## 5. LibreOffice renders are only a smoke check
 
 `tests/integration/render-libreoffice.test.ts` converts workbooks to PDF and PNG in `tests/output/render/` when `soffice`, `pdftoppm` and `pdftotext` are on the PATH. `tests/integration/writer-render.test.ts` does the same in `tests/output/writer/all-charts.pdf`. These renders show that the chart parts parse and draw. LibreOffice's chart engine is not Excel's, though: fonts, label placement, axis crossing and repair behaviour differ. For example, LibreOffice draws a rich chart title entirely in its first paragraph's style, so the subtitle line appears in the title font there. Excel honours the per-paragraph fonts, and that is what the checklist must confirm. A good LibreOffice render is **not** evidence that Excel accepts the file. Only the checklist above is.

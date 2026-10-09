@@ -12,6 +12,8 @@ export interface HighchartsLike {
 }
 
 const rendered: Array<{ chart: Chart; container: HTMLElement }> = [];
+/** Charts this helper has already destroyed (a test may destroy one itself via `destroyChart`). */
+const destroyed = new WeakSet<Chart>();
 let counter = 0;
 
 /** Deep clone that keeps functions (structuredClone rejects them). */
@@ -25,7 +27,11 @@ export function cloneOptions<T>(value: T): T {
   return value;
 }
 
-export function renderChart(Highcharts: HighchartsLike, options: Options, ctor: 'chart' | 'stockChart' = 'chart'): Chart {
+export function renderChart(
+  Highcharts: HighchartsLike,
+  options: Options,
+  ctor: 'chart' | 'stockChart' = 'chart',
+): Chart {
   const container = document.createElement('div');
   container.id = `test-chart-${++counter}`;
   document.body.appendChild(container);
@@ -44,14 +50,22 @@ export function renderChart(Highcharts: HighchartsLike, options: Options, ctor: 
   return chart;
 }
 
-/** Destroys every chart rendered through `renderChart` and removes its container. */
+/** Destroys one chart and marks it so `destroyAll` skips it later. */
+export function destroyChart(chart: Chart): void {
+  if (destroyed.has(chart)) return;
+  chart.destroy();
+  destroyed.add(chart);
+}
+
+/**
+ * Destroys every chart rendered through `renderChart` and removes its container. Charts that are
+ * already gone (destroyed through `destroyChart`, or by Highcharts itself, which deletes
+ * `renderTo`/`container`) are skipped; any other error from `chart.destroy()` propagates.
+ */
 export function destroyAll(): void {
   for (const { chart, container } of rendered.splice(0)) {
-    try {
-      chart.destroy();
-    } catch {
-      // already destroyed
-    }
+    const live = chart as Chart & { renderTo?: unknown; container?: unknown };
+    if (!destroyed.has(chart) && live.renderTo && live.container) destroyChart(chart);
     container.remove();
   }
 }

@@ -20,6 +20,7 @@ describe('resolveChartType: single types', () => {
     ['secondaryAxisModel', 'combo:column+line', ['bar', 'line']],
     ['nullNegativeModel', 'column', ['bar']],
   ] as const)('%s → %s', (name, type, groupKinds) => {
+    // biome-ignore lint/performance/noDynamicNamespaceImportAccess: the table names fixtures by key
     const r = resolveChartType(F[name]());
     expect(r.blocking).toBe(false);
     expect(r.excelChartType).toBe(type);
@@ -84,7 +85,10 @@ describe('resolveChartType: grouping and combos', () => {
     m.series[1] = { ...m.series[1]!, stackGroup: 'other' };
     const r = resolveChartType(m);
     expect(r.groups).toHaveLength(1);
-    expect(r.diagnostics.find((d) => d.code === 'APPROXIMATED_CHART_TYPE')).toMatchObject({ property: 'series[1].stack', seriesIndex: 1 });
+    expect(r.diagnostics.find((d) => d.code === 'APPROXIMATED_CHART_TYPE')).toMatchObject({
+      property: 'series[1].stack',
+      seriesIndex: 1,
+    });
   });
 
   it('allows scatter in a combo with category types', () => {
@@ -173,7 +177,9 @@ describe('resolveChartType: unsupported and blocking', () => {
   it('polar is blocking', () => {
     const r = resolveChartType(F.polarModel());
     expect(r.blocking).toBe(true);
-    expect(r.diagnostics).toEqual([expect.objectContaining({ code: 'UNSUPPORTED_POLAR', outcome: 'blocking', property: 'chart.polar' })]);
+    expect(r.diagnostics).toEqual([
+      expect.objectContaining({ code: 'UNSUPPORTED_POLAR', outcome: 'blocking', property: 'chart.polar' }),
+    ]);
   });
 
   it('empty charts are blocking', () => {
@@ -196,14 +202,72 @@ describe('CHART_TYPE_MATRIX', () => {
   it('documents every listed Highcharts type with a reason', () => {
     const names = CHART_TYPE_MATRIX.map((e) => e.highcharts.split(' ')[0]);
     for (const t of [
-      'line', 'spline', 'area', 'areaspline', 'column', 'bar', 'pie', 'scatter', 'bubble', 'columnrange', 'arearange', 'boxplot',
-      'heatmap', 'treemap', 'waterfall', 'funnel', 'gauge', 'polar', 'variablepie', 'sankey', 'networkgraph', 'timeline',
-      'histogram', 'bellcurve', 'errorbar', 'lollipop', 'dumbbell',
+      'line',
+      'spline',
+      'area',
+      'areaspline',
+      'column',
+      'bar',
+      'pie',
+      'scatter',
+      'bubble',
+      'columnrange',
+      'arearange',
+      'boxplot',
+      'heatmap',
+      'treemap',
+      'waterfall',
+      'funnel',
+      'gauge',
+      'polar',
+      'variablepie',
+      'sankey',
+      'networkgraph',
+      'timeline',
+      'histogram',
+      'bellcurve',
+      'errorbar',
+      'lollipop',
+      'dumbbell',
     ]) {
       expect(names).toContain(t);
     }
     expect(CHART_TYPE_MATRIX.find((e) => e.highcharts === 'pie + innerSize')?.excel).toBe('doughnut');
     for (const e of CHART_TYPE_MATRIX) expect(e.notes.length).toBeGreaterThan(10);
     expect(CHART_TYPE_MATRIX.filter((e) => e.support === 'unsupported').length).toBeGreaterThanOrEqual(18);
+  });
+});
+
+describe('resolveChartType: mixed stacking (C4)', () => {
+  it('merges stacked + unstacked columns on the same axes into one group (majority stacking, ties → stacked)', () => {
+    const m = F.baseModel();
+    m.series = [
+      F.series({ kind: 'column', index: 0, stacking: 'normal', points: F.pts([1, 2, 3, 4]) }),
+      F.series({ kind: 'column', index: 1, stacking: null, points: F.pts([1, 2, 3, 4]) }),
+    ];
+    const r = resolveChartType(m);
+    expect(r.groups).toHaveLength(1);
+    expect(r.groups[0]).toMatchObject({ kind: 'bar', stacking: 'normal', seriesIndices: [0, 1] });
+    expect(r.excelChartType).toBe('stackedColumn');
+    expect(r.diagnostics.find((d) => d.code === 'APPROXIMATED_CHART_TYPE')).toMatchObject({
+      outcome: 'approximated',
+      severity: 'warning',
+      property: 'series[1].stacking',
+      seriesIndex: 1,
+    });
+  });
+
+  it('majority unstacked wins', () => {
+    const m = F.baseModel();
+    m.series = [
+      F.series({ kind: 'column', index: 0, stacking: 'normal', points: F.pts([1, 2, 3, 4]) }),
+      F.series({ kind: 'column', index: 1, points: F.pts([1, 2, 3, 4]) }),
+      F.series({ kind: 'column', index: 2, points: F.pts([1, 2, 3, 4]) }),
+    ];
+    const r = resolveChartType(m);
+    expect(r.groups.map((g) => [g.kind, g.stacking, g.seriesIndices])).toEqual([['bar', null, [0, 1, 2]]]);
+    expect(r.diagnostics.filter((d) => d.code === 'APPROXIMATED_CHART_TYPE').map((d) => d.property)).toEqual([
+      'series[0].stacking',
+    ]);
   });
 });

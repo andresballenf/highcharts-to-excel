@@ -29,13 +29,24 @@ function findGetSvg(chart: unknown): GetSvg | null {
   const c = chart as { getSVG?: unknown; exporting?: { getSVG?: unknown } };
   if (typeof c.getSVG === 'function') return (opts) => (c.getSVG as (o?: unknown) => unknown).call(chart, opts);
   const exp = c.exporting;
-  if (exp && typeof exp.getSVG === 'function') return (opts) => (exp.getSVG as (o?: unknown, a?: boolean) => unknown).call(exp, opts, false);
+  if (exp && typeof exp.getSVG === 'function')
+    return (opts) => (exp.getSVG as (o?: unknown, a?: boolean) => unknown).call(exp, opts, false);
   return null;
 }
 
 /** Reports that the reference image could not be produced. */
-export function reportReferenceImageUnavailable(diagnostics: DiagnosticCollector, reason: string, severity: 'info' | 'warning' = 'warning'): void {
-  diagnostics.report('WRITER_LIMITATION', 'unsupported', REFERENCE_IMAGE_PROPERTY, `Reference image omitted: ${reason}`, { severity });
+export function reportReferenceImageUnavailable(
+  diagnostics: DiagnosticCollector,
+  reason: string,
+  severity: 'info' | 'warning' = 'warning',
+): void {
+  diagnostics.report(
+    'WRITER_LIMITATION',
+    'unsupported',
+    REFERENCE_IMAGE_PROPERTY,
+    `Reference image omitted: ${reason}`,
+    { severity },
+  );
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {
@@ -99,7 +110,10 @@ export async function renderReferenceImage(
     if (png.length === 0) throw new Error('empty PNG');
     return { png, widthPx: w, heightPx: h };
   } catch (error) {
-    reportReferenceImageUnavailable(diagnostics, `rendering failed (${error instanceof Error ? error.message : String(error)}).`);
+    reportReferenceImageUnavailable(
+      diagnostics,
+      `rendering failed (${error instanceof Error ? error.message : String(error)}).`,
+    );
     return null;
   } finally {
     if (url !== null) URL.revokeObjectURL(url);

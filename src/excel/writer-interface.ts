@@ -34,6 +34,8 @@ export type CellValue =
   | { type: 'string'; value: string }
   | { type: 'number'; value: number }
   | { type: 'boolean'; value: boolean }
+  /** An Excel error value. `#N/A` makes line/area charts skip the point and connect neighbours. */
+  | { type: 'error'; value: '#N/A' }
   | { type: 'blank' };
 
 export interface CellStyleSpec {
@@ -314,6 +316,8 @@ export interface ExcelChartSpec {
     font: ExcelFontSpec | null;
     fill: ExcelFillSpec | null;
     line: ExcelLineSpec | null;
+    /** Series `idx` values whose legend entry is deleted (c:legendEntry/c:delete). */
+    deletedEntries: number[];
   } | null;
   dispBlanksAs: 'gap' | 'zero' | 'span';
   /** Excel chart style number (1-48). Null = omit. */

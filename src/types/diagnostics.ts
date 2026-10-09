@@ -105,7 +105,14 @@ export function createDiagnostic(
   extra: Partial<Pick<Diagnostic, 'severity' | 'seriesIndex' | 'details'>> = {},
 ): Diagnostic {
   const severity: DiagnosticSeverity =
-    extra.severity ?? (outcome === 'blocking' ? 'error' : outcome === 'translated' ? 'info' : outcome === 'unsupported' ? 'warning' : 'warning');
+    extra.severity ??
+    (outcome === 'blocking'
+      ? 'error'
+      : outcome === 'translated'
+        ? 'info'
+        : outcome === 'unsupported'
+          ? 'warning'
+          : 'warning');
   const d: Diagnostic = { code, severity, outcome, property, message };
   if (extra.seriesIndex !== undefined) d.seriesIndex = extra.seriesIndex;
   if (extra.details !== undefined) d.details = extra.details;

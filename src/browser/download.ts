@@ -6,6 +6,19 @@ import { exportHighchartsToXlsx } from '../api/export';
 import { ExportError, XLSX_MIME_TYPE, type ExportOptions, type ExportResult } from '../types/public-api';
 
 /**
+ * How long the object URL stays valid after the click. Revoking on the next tick can cancel the
+ * download in some browsers (notably Safari and Firefox with large files), so it is kept for a minute.
+ */
+const REVOKE_DELAY_MS = 60_000;
+
+/** A Blob part for `bytes`: the view itself when it spans its whole buffer, else a compact copy. */
+function blobPart(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  const whole =
+    bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer;
+  return (whole ? bytes : bytes.slice()) as Uint8Array<ArrayBuffer>;
+}
+
+/**
  * Saves `bytes` as a file through a temporary `<a download>` element.
  *
  * @throws ExportError BROWSER_REQUIRED when `document` or `URL.createObjectURL` is unavailable.
@@ -20,8 +33,7 @@ export function triggerDownload(bytes: Uint8Array, filename: string, mimeType: s
   ) {
     throw new ExportError('BROWSER_REQUIRED', 'Downloading requires a browser (document and URL.createObjectURL).');
   }
-  // Copy into a fresh ArrayBuffer-backed view so the Blob never sees a shared/oversized buffer.
-  const blob = new Blob([bytes.slice()], { type: mimeType });
+  const blob = new Blob([blobPart(bytes)], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const revoke = (): void => {
     if (typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url);
@@ -38,12 +50,16 @@ export function triggerDownload(bytes: Uint8Array, filename: string, mimeType: s
     clicked = true;
   } finally {
     anchor.remove();
-    if (clicked) setTimeout(revoke, 0);
+    if (clicked) setTimeout(revoke, REVOKE_DELAY_MS);
     else revoke();
   }
 }
 
-/** Exports the chart and immediately downloads the workbook. Errors propagate as ExportError. */
+/**
+ * Exports the chart and immediately downloads the workbook. Library errors propagate as
+ * ExportError (see `exportHighchartsToXlsx`); errors thrown by your own callbacks (`onWarning`,
+ * `hooks.transformModel`) propagate unwrapped.
+ */
 export async function downloadHighchartsAsXlsx(chart: unknown, options?: ExportOptions): Promise<ExportResult> {
   const result = await exportHighchartsToXlsx(chart, options);
   triggerDownload(result.bytes, result.filename, result.mimeType);

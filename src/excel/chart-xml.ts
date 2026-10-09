@@ -16,7 +16,23 @@ import {
   type PlotGroupSpec,
 } from './writer-interface';
 import { fillXml, lineXml, spPrXml, titleXml, txPrXml } from './drawingml-xml';
-import { clampInt, clampNum, escapeAttr, escapeXml, finite, formatNumber, valEl, xmlDocument } from './xml';
+import { assertExcelFormatCode } from '../utils/format-code';
+import {
+  clampInt,
+  clampNum,
+  escapeAttr,
+  escapeXml,
+  escapeXstring,
+  finite,
+  formatNumber,
+  valEl,
+  xmlDocument,
+} from './xml';
+
+/** Largest value of an ST_UnsignedInt idx/order. */
+const MAX_UNSIGNED_INT = 4_294_967_295;
+/** Largest tickLblSkip / tickMarkSkip Excel accepts (ST_Skip is 1..31999). */
+const MAX_SKIP = 31_999;
 
 const NS_C = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
 const NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
@@ -29,7 +45,9 @@ type GroupKind = PlotGroupSpec['kind'];
 // ---------------------------------------------------------------------------
 
 function formulaXml(formula: string, what: string): string {
-  const f = String(formula ?? '').trim().replace(/^=/, '');
+  const f = String(formula ?? '')
+    .trim()
+    .replace(/^=/, '');
   if (f === '') throw new Error(`Chart ${what} reference has an empty formula`);
   return `<c:f>${escapeXml(f)}</c:f>`;
 }
@@ -59,7 +77,8 @@ export function numRefXml(ref: ExcelSeriesRef<unknown>, what: string): string {
     const n = cacheNumber(v);
     if (n !== null) pts.push(`<c:pt idx="${i}"><c:v>${formatNumber(n)}</c:v></c:pt>`);
   });
-  const code = ref.formatCode && ref.formatCode !== '' ? ref.formatCode : 'General';
+  const code =
+    ref.formatCode && ref.formatCode !== '' ? assertExcelFormatCode(ref.formatCode, `chart ${what} cache`) : 'General';
   return (
     '<c:numRef>' +
     formulaXml(ref.formula, what) +
@@ -78,7 +97,7 @@ export function strRefXml(ref: ExcelSeriesRef<unknown>, what: string): string {
       pts.push(`<c:pt idx="${i}"><c:v>${formatNumber(v)}</c:v></c:pt>`);
       return;
     }
-    pts.push(`<c:pt idx="${i}"><c:v>${escapeXml(String(v))}</c:v></c:pt>`);
+    pts.push(`<c:pt idx="${i}"><c:v>${escapeXstring(String(v))}</c:v></c:pt>`);
   });
   return (
     '<c:strRef>' +
@@ -93,11 +112,11 @@ function seriesTxXml(name: ExcelSeriesSpec['name']): string {
     return (
       '<c:tx><c:strRef>' +
       formulaXml(name.formula, 'series name') +
-      `<c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${escapeXml(name.cache ?? '')}</c:v></c:pt></c:strCache>` +
+      `<c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${escapeXstring(name.cache ?? '')}</c:v></c:pt></c:strCache>` +
       '</c:strRef></c:tx>'
     );
   }
-  return `<c:tx><c:v>${escapeXml(name.text ?? '')}</c:v></c:tx>`;
+  return `<c:tx><c:v>${escapeXstring(name.text ?? '')}</c:v></c:tx>`;
 }
 
 function categoriesXml(tag: 'c:cat' | 'c:xVal', cats: ExcelSeriesSpec['categories']): string {
@@ -138,7 +157,9 @@ function dLblPosXml(pos: ExcelDataLabelPosition | null, ctx: GroupCtx): string {
 /** The shared numFmt/spPr/txPr/dLblPos/show* sequence of CT_DLbls and CT_DLbl. */
 function dLblBodyXml(spec: ExcelDataLabelsSpec, ctx: GroupCtx): string {
   return (
-    (spec.numberFormat ? `<c:numFmt formatCode="${escapeAttr(spec.numberFormat)}" sourceLinked="0"/>` : '') +
+    (spec.numberFormat
+      ? `<c:numFmt formatCode="${escapeAttr(assertExcelFormatCode(spec.numberFormat, 'data labels'))}" sourceLinked="0"/>`
+      : '') +
     spPrXml(spec.fill, spec.line) +
     txPrXml(spec.font) +
     dLblPosXml(spec.position, ctx) +
@@ -193,7 +214,8 @@ function markerXml(marker: ExcelMarkerSpec | null, ctx: GroupCtx): string {
     // Honour group-level intent where Excel would otherwise draw automatic markers.
     const noMarkers =
       (ctx.kind === 'line' && ctx.hideMarkers) ||
-      (ctx.kind === 'scatter' && (ctx.scatterStyle === 'line' || ctx.scatterStyle === 'smooth' || ctx.scatterStyle === 'none'));
+      (ctx.kind === 'scatter' &&
+        (ctx.scatterStyle === 'line' || ctx.scatterStyle === 'smooth' || ctx.scatterStyle === 'none'));
     return noMarkers ? '<c:marker><c:symbol val="none"/></c:marker>' : '';
   }
   if (marker.symbol === 'none') return '<c:marker><c:symbol val="none"/></c:marker>';
@@ -219,8 +241,45 @@ function dPtXml(dp: ExcelSeriesSpec['dataPoints'][number], ctx: GroupCtx): strin
 }
 
 function checkIdx(n: number, what: string): number {
-  if (!Number.isInteger(n) || n < 0) throw new Error(`Chart ${what} must be a non-negative integer, got ${String(n)}`);
+  if (!Number.isInteger(n) || n < 0 || n > MAX_UNSIGNED_INT) {
+    throw new Error(`Chart ${what} must be an integer in 0..${MAX_UNSIGNED_INT}, got ${String(n)}`);
+  }
   return n;
+}
+
+/**
+ * Series-level checks Excel enforces when loading: series idx/order unique across the chart, and
+ * dPt / dLbl idx unique per series and below the point count.
+ */
+function validateSeries(spec: ExcelChartSpec): void {
+  const total = spec.plotGroups.reduce((n, g) => n + g.series.length, 0);
+  if (total > EXCEL_MAX_SERIES_PER_CHART) {
+    throw new Error(`Chart has ${total} series; Excel allows at most ${EXCEL_MAX_SERIES_PER_CHART} per chart`);
+  }
+  const idxs = new Set<number>();
+  const orders = new Set<number>();
+  for (const g of spec.plotGroups) {
+    for (const s of g.series) {
+      checkIdx(s.idx, 'series idx');
+      checkIdx(s.order, 'series order');
+      if (idxs.has(s.idx)) throw new Error(`Chart has duplicate series idx ${s.idx}`);
+      if (orders.has(s.order)) throw new Error(`Chart has duplicate series order ${s.order}`);
+      idxs.add(s.idx);
+      orders.add(s.order);
+      const ptCount = s.values.cache.length;
+      const seen = new Set<number>();
+      for (const dp of s.dataPoints) {
+        checkIdx(dp.idx, `series ${s.idx} data point idx`);
+        if (seen.has(dp.idx)) throw new Error(`Chart series ${s.idx}: duplicate data point idx ${dp.idx}`);
+        seen.add(dp.idx);
+        if (dp.idx >= ptCount) {
+          throw new Error(
+            `Chart series ${s.idx}: data point idx ${dp.idx} (dPt/dLbl) is outside the series' ${ptCount} points`,
+          );
+        }
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -246,7 +305,8 @@ function bubbleSizeXml(s: ExcelSeriesSpec): string {
 
 function smoothXml(s: ExcelSeriesSpec, ctx: GroupCtx): string {
   if (s.smooth !== null && s.smooth !== undefined) return valEl('c:smooth', s.smooth ? 1 : 0);
-  if (ctx.kind === 'scatter') return valEl('c:smooth', ctx.scatterStyle === 'smooth' || ctx.scatterStyle === 'smoothMarker' ? 1 : 0);
+  if (ctx.kind === 'scatter')
+    return valEl('c:smooth', ctx.scatterStyle === 'smooth' || ctx.scatterStyle === 'smoothMarker' ? 1 : 0);
   return valEl('c:smooth', 0);
 }
 
@@ -274,7 +334,8 @@ export function seriesXml(s: ExcelSeriesSpec, ctx: GroupCtx): string {
       body = head + invert + dPts + dLbls + categoriesXml('c:cat', s.categories) + val;
       break;
     case 'line':
-      body = head + markerXml(s.marker, ctx) + dPts + dLbls + categoriesXml('c:cat', s.categories) + val + smoothXml(s, ctx);
+      body =
+        head + markerXml(s.marker, ctx) + dPts + dLbls + categoriesXml('c:cat', s.categories) + val + smoothXml(s, ctx);
       break;
     case 'area':
     case 'pie':
@@ -319,12 +380,12 @@ function axIdsXml(ids: [number, number]): string {
 }
 
 export function plotGroupXml(g: PlotGroupSpec): string {
-  if (g.series.length > EXCEL_MAX_SERIES_PER_CHART) {
-    throw new Error(`Chart group has ${g.series.length} series; Excel allows at most ${EXCEL_MAX_SERIES_PER_CHART}`);
-  }
   const ctx: GroupCtx = {
     kind: g.kind,
-    stacked: (g.kind === 'bar' || g.kind === 'line' || g.kind === 'area') && g.grouping !== 'clustered' && g.grouping !== 'standard',
+    stacked:
+      (g.kind === 'bar' || g.kind === 'line' || g.kind === 'area') &&
+      g.grouping !== 'clustered' &&
+      g.grouping !== 'standard',
     hideMarkers: g.kind === 'line' && !g.showMarkers,
     scatterStyle: g.kind === 'scatter' ? g.scatterStyle : null,
   };
@@ -360,9 +421,17 @@ export function plotGroupXml(g: PlotGroupSpec): string {
         '</c:lineChart>'
       );
     case 'area':
-      return '<c:areaChart>' + valEl('c:grouping', g.grouping) + vary + ser + dLbls + axIdsXml(g.axisIds) + '</c:areaChart>';
+      return `<c:areaChart>${valEl('c:grouping', g.grouping)}${vary}${ser}${dLbls}${axIdsXml(g.axisIds)}</c:areaChart>`;
     case 'scatter':
-      return '<c:scatterChart>' + valEl('c:scatterStyle', g.scatterStyle) + vary + ser + dLbls + axIdsXml(g.axisIds) + '</c:scatterChart>';
+      return (
+        '<c:scatterChart>' +
+        valEl('c:scatterStyle', g.scatterStyle) +
+        vary +
+        ser +
+        dLbls +
+        axIdsXml(g.axisIds) +
+        '</c:scatterChart>'
+      );
     case 'bubble':
       return (
         '<c:bubbleChart>' +
@@ -376,7 +445,14 @@ export function plotGroupXml(g: PlotGroupSpec): string {
         '</c:bubbleChart>'
       );
     case 'pie':
-      return '<c:pieChart>' + vary + ser + dLbls + valEl('c:firstSliceAng', clampInt(g.firstSliceAngle, 0, 360, 0)) + '</c:pieChart>';
+      return (
+        '<c:pieChart>' +
+        vary +
+        ser +
+        dLbls +
+        valEl('c:firstSliceAng', clampInt(g.firstSliceAngle, 0, 360, 0)) +
+        '</c:pieChart>'
+      );
     case 'doughnut':
       return (
         '<c:doughnutChart>' +
@@ -448,7 +524,7 @@ function axisCommonXml(ax: ExcelAxisSpec): string {
     gridlinesXml('c:minorGridlines', ax.minorGridlines) +
     titleXml(ax.title) +
     (ax.numberFormat
-      ? `<c:numFmt formatCode="${escapeAttr(ax.numberFormat.code || 'General')}" sourceLinked="${ax.numberFormat.sourceLinked ? 1 : 0}"/>`
+      ? `<c:numFmt formatCode="${escapeAttr(ax.numberFormat.code ? assertExcelFormatCode(ax.numberFormat.code, `axis ${ax.id}`) : 'General')}" sourceLinked="${ax.numberFormat.sourceLinked ? 1 : 0}"/>`
       : '') +
     valEl('c:majorTickMark', ax.majorTickMark) +
     valEl('c:minorTickMark', 'none') +
@@ -467,7 +543,7 @@ export function axisXml(ax: ExcelAxisSpec, crossBetween: 'between' | 'midCat'): 
   switch (ax.kind) {
     case 'cat': {
       // On a category axis the "unit" is a label/tick skip count.
-      const skip = major !== null ? Math.max(1, Math.round(major)) : null;
+      const skip = major !== null ? clampInt(major, 1, MAX_SKIP, 1) : null;
       return (
         '<c:catAx>' +
         common +
@@ -482,14 +558,17 @@ export function axisXml(ax: ExcelAxisSpec, crossBetween: 'between' | 'midCat'): 
     case 'date': {
       const base = ax.dateAxis?.baseTimeUnit ?? null;
       const unit = base ?? 'days';
+      // Date axis units count whole base time units: anything else is omitted (Excel's automatic unit).
+      const dateMajor = major !== null && Number.isInteger(major) && major >= 1 ? major : null;
+      const dateMinor = minor !== null && Number.isInteger(minor) && minor >= 1 ? minor : null;
       return (
         '<c:dateAx>' +
         common +
         valEl('c:auto', 1) +
         valEl('c:lblOffset', 100) +
         (base !== null ? valEl('c:baseTimeUnit', base) : '') +
-        (major !== null ? valEl('c:majorUnit', major) + valEl('c:majorTimeUnit', unit) : '') +
-        (minor !== null ? valEl('c:minorUnit', minor) + valEl('c:minorTimeUnit', unit) : '') +
+        (dateMajor !== null ? valEl('c:majorUnit', dateMajor) + valEl('c:majorTimeUnit', unit) : '') +
+        (dateMinor !== null ? valEl('c:minorUnit', dateMinor) + valEl('c:minorTimeUnit', unit) : '') +
         '</c:dateAx>'
       );
     }
@@ -521,13 +600,31 @@ function validateAxes(spec: ExcelChartSpec): Map<number, ExcelAxisSpec> {
     byId.set(ax.id, ax);
   }
   for (const ax of spec.axes) {
-    if (!byId.has(ax.crossAxisId)) throw new Error(`Axis ${ax.id} crosses unknown axis ${ax.crossAxisId}`);
+    const partner = byId.get(ax.crossAxisId);
+    if (!partner) throw new Error(`Axis ${ax.id} crosses unknown axis ${ax.crossAxisId}`);
+    if (partner.crossAxisId !== ax.id) {
+      throw new Error(
+        `Axis ${ax.id} crosses axis ${ax.crossAxisId}, which crosses ${partner.crossAxisId}: crossAx must be reciprocal`,
+      );
+    }
   }
+  const pairs = new Set<string>();
+  const used = new Set<number>();
   for (const g of spec.plotGroups) {
     if (g.kind === 'pie' || g.kind === 'doughnut') continue;
     for (const id of g.axisIds) {
       if (!byId.has(id)) throw new Error(`Plot group "${g.kind}" references unknown axis id ${id}`);
+      used.add(id);
     }
+    pairs.add([...g.axisIds].sort((a, b) => a - b).join('/'));
+  }
+  if (pairs.size > 2) {
+    throw new Error(
+      `Chart uses ${pairs.size} axis pairs (${[...pairs].join(', ')}); Excel has only two axis groups (primary and secondary)`,
+    );
+  }
+  for (const ax of spec.axes) {
+    if (!used.has(ax.id)) throw new Error(`Axis ${ax.id} is not used by any plot group`);
   }
   return byId;
 }
@@ -552,6 +649,12 @@ function legendXml(legend: ExcelChartSpec['legend']): string {
   return (
     '<c:legend>' +
     valEl('c:legendPos', legend.position) +
+    // Schema order: legendPos, legendEntry*, layout, overlay, spPr, txPr.
+    [...new Set(legend.deletedEntries ?? [])]
+      .filter((i) => Number.isInteger(i) && i >= 0)
+      .sort((a, b) => a - b)
+      .map((i) => `<c:legendEntry>${valEl('c:idx', i)}${valEl('c:delete', 1)}</c:legendEntry>`)
+      .join('') +
     '<c:layout/>' +
     valEl('c:overlay', legend.overlay ? 1 : 0) +
     spPrXml(legend.fill, legend.line) +
@@ -562,6 +665,7 @@ function legendXml(legend: ExcelChartSpec['legend']): string {
 
 export function buildChartXml(spec: ExcelChartSpec): string {
   if (spec.plotGroups.length === 0) throw new Error('Chart has no plot groups');
+  validateSeries(spec);
   const axesById = validateAxes(spec);
   const groupsByAxis = new Map<number, GroupKind[]>();
   for (const g of spec.plotGroups) {
@@ -595,7 +699,8 @@ export function buildChartXml(spec: ExcelChartSpec): string {
     valEl('c:dispBlanksAs', spec.dispBlanksAs) +
     '</c:chart>';
 
-  const style = spec.style !== null && Number.isFinite(spec.style) ? valEl('c:style', clampInt(spec.style, 1, 48, 2)) : '';
+  const style =
+    spec.style !== null && Number.isFinite(spec.style) ? valEl('c:style', clampInt(spec.style, 1, 48, 2)) : '';
 
   return xmlDocument(
     `<c:chartSpace xmlns:c="${NS_C}" xmlns:a="${NS_A}" xmlns:r="${NS_R}">` +

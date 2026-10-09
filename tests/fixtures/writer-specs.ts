@@ -75,7 +75,12 @@ export function series(i: number, o: Partial<ExcelSeriesSpec> = {}): ExcelSeries
   };
 }
 
-export function axis(id: number, kind: ExcelAxisSpec['kind'], crossAxisId: number, o: Partial<ExcelAxisSpec> = {}): ExcelAxisSpec {
+export function axis(
+  id: number,
+  kind: ExcelAxisSpec['kind'],
+  crossAxisId: number,
+  o: Partial<ExcelAxisSpec> = {},
+): ExcelAxisSpec {
   return {
     id,
     kind,
@@ -98,15 +103,29 @@ export function axis(id: number, kind: ExcelAxisSpec['kind'], crossAxisId: numbe
   };
 }
 
-export function chart(plotGroups: PlotGroupSpec[], axes: ExcelAxisSpec[], o: Partial<ExcelChartSpec> = {}): ExcelChartSpec {
+export function chart(
+  plotGroups: PlotGroupSpec[],
+  axes: ExcelAxisSpec[],
+  o: Partial<ExcelChartSpec> = {},
+): ExcelChartSpec {
   return {
     title: { lines: ['Quarterly results'], font: font({ bold: true, sizeHundredthsPt: 1400 }), overlay: false },
     textDefaults: font(),
-    chartArea: { fill: { type: 'solid', hex: 'FFFFFF', alpha: 1 }, line: { widthPx: 0, hex: null, alpha: 1, dash: 'solid', noFill: true } },
+    chartArea: {
+      fill: { type: 'solid', hex: 'FFFFFF', alpha: 1 },
+      line: { widthPx: 0, hex: null, alpha: 1, dash: 'solid', noFill: true },
+    },
     plotArea: { fill: null, line: null, manualLayout: null },
     plotGroups,
     axes,
-    legend: { position: 'b', overlay: false, font: font({ sizeHundredthsPt: 900 }), fill: null, line: null },
+    legend: {
+      position: 'b',
+      overlay: false,
+      font: font({ sizeHundredthsPt: 900 }),
+      fill: null,
+      line: null,
+      deletedEntries: [],
+    },
     dispBlanksAs: 'gap',
     style: null,
     ...o,
@@ -132,7 +151,13 @@ export const chartSpecs = {
             series(0, {
               dataLabels: labels({ position: 'outEnd', numberFormat: '0.0', font: font({ bold: true }) }),
               dataPoints: [
-                { idx: 2, shape: { fill: { type: 'solid', hex: 'FF0000', alpha: 1 }, line: null }, marker: null, explosion: null, dataLabels: null },
+                {
+                  idx: 2,
+                  shape: { fill: { type: 'solid', hex: 'FF0000', alpha: 1 }, line: null },
+                  marker: null,
+                  explosion: null,
+                  dataLabels: null,
+                },
                 { idx: 0, shape: null, marker: null, explosion: null, dataLabels: labels({ showValue: false }) },
               ],
             }),
@@ -193,7 +218,13 @@ export const chartSpecs = {
               smooth: true,
               dataLabels: labels({ position: 't' }),
               dataPoints: [
-                { idx: 1, shape: null, marker: { symbol: 'diamond', size: 100, fill: null, line: null }, explosion: null, dataLabels: null },
+                {
+                  idx: 1,
+                  shape: null,
+                  marker: { symbol: 'diamond', size: 100, fill: null, line: null },
+                  explosion: null,
+                  dataLabels: null,
+                },
               ],
             }),
             series(1, { marker: { symbol: 'none', size: 5, fill: null, line: null } }),
@@ -268,7 +299,13 @@ export const chartSpecs = {
               values: { formula: VAL2_F, cache: [4, 3, 2, 1] },
               dataLabels: labels({ showPercent: true, showCategoryName: true, position: 'bestFit' }),
               dataPoints: [
-                { idx: 0, shape: { fill: { type: 'solid', hex: '70AD47', alpha: 1 }, line: null }, marker: null, explosion: 15, dataLabels: null },
+                {
+                  idx: 0,
+                  shape: { fill: { type: 'solid', hex: '70AD47', alpha: 1 }, line: null },
+                  marker: null,
+                  explosion: 15,
+                  dataLabels: null,
+                },
               ],
             }),
           ],
@@ -285,7 +322,9 @@ export const chartSpecs = {
           firstSliceAngle: 400,
           holeSize: 5,
           dataLabels: null,
-          series: [series(0, { values: { formula: VAL2_F, cache: [4, 3, 2, 1] }, dataLabels: labels({ position: 'outEnd' }) })],
+          series: [
+            series(0, { values: { formula: VAL2_F, cache: [4, 3, 2, 1] }, dataLabels: labels({ position: 'outEnd' }) }),
+          ],
         },
       ],
       [],
@@ -359,7 +398,12 @@ export const chartSpecs = {
           dataLabels: null,
           series: [
             series(0, {
-              categories: { kind: 'num', formula: "'Data'!$F$2:$F$5", cache: [45292, 45323, 45352, 45383], formatCode: 'yyyy-mm-dd' },
+              categories: {
+                kind: 'num',
+                formula: "'Data'!$F$2:$F$5",
+                cache: [45292, 45323, 45352, 45383],
+                formatCode: 'yyyy-mm-dd',
+              },
             }),
           ],
         },
@@ -429,7 +473,11 @@ export const chartSpecs = {
       ],
       catVal(),
       {
-        plotArea: { fill: { type: 'solid', hex: 'F2F2F2', alpha: 1 }, line: null, manualLayout: { x: 0.1, y: 0.15, w: 0.8, h: 1.5 } },
+        plotArea: {
+          fill: { type: 'solid', hex: 'F2F2F2', alpha: 1 },
+          line: null,
+          manualLayout: { x: 0.1, y: 0.15, w: 0.8, h: 1.5 },
+        },
         style: 2,
         title: null,
         legend: null,
@@ -471,17 +519,72 @@ export function fullWorkbook(o: { charts?: ExcelChartSpec[]; image?: boolean } =
         str(6, 0, 'Share', header),
       ],
     },
-    { row0: 1, cells: [str(0, 1, 'Q1'), num(1, 1, 1), num(2, 1, 4), num(3, 1, 1.5), num(4, 1, 10), num(5, 1, 45292, date), num(6, 1, 0.125, pct)] },
+    {
+      row0: 1,
+      cells: [
+        str(0, 1, 'Q1'),
+        num(1, 1, 1),
+        num(2, 1, 4),
+        num(3, 1, 1.5),
+        num(4, 1, 10),
+        num(5, 1, 45292, date),
+        num(6, 1, 0.125, pct),
+      ],
+    },
     // Sales Q2 is null: written as a blank (omitted) cell.
-    { row0: 2, cells: [str(0, 2, 'Q2'), { col0: 1, row0: 2, value: { type: 'blank' } }, num(2, 2, 3), num(3, 2, 2.5), num(4, 2, 20), num(5, 2, 45323, date), num(6, 2, 0.5, pct)] },
-    { row0: 3, cells: [{ col0: 0, row0: 3, value: { type: 'blank' }, style: { italic: true } }, num(1, 3, 3), num(2, 3, 2), num(3, 3, 3.5), num(4, 3, 30), num(5, 3, 45352, date), num(6, 3, 1, pct)] },
-    { row0: 4, cells: [str(0, 4, 'Q4'), num(1, 4, Number.NaN), num(2, 4, 1), num(3, 4, 4.5), num(4, 4, 40), num(5, 4, 45383, date), num(6, 4, -0, pct)] },
+    {
+      row0: 2,
+      cells: [
+        str(0, 2, 'Q2'),
+        { col0: 1, row0: 2, value: { type: 'blank' } },
+        num(2, 2, 3),
+        num(3, 2, 2.5),
+        num(4, 2, 20),
+        num(5, 2, 45323, date),
+        num(6, 2, 0.5, pct),
+      ],
+    },
+    {
+      row0: 3,
+      cells: [
+        { col0: 0, row0: 3, value: { type: 'blank' }, style: { italic: true } },
+        num(1, 3, 3),
+        num(2, 3, 2),
+        num(3, 3, 3.5),
+        num(4, 3, 30),
+        num(5, 3, 45352, date),
+        num(6, 3, 1, pct),
+      ],
+    },
+    {
+      row0: 4,
+      cells: [
+        str(0, 4, 'Q4'),
+        num(1, 4, Number.NaN),
+        num(2, 4, 1),
+        num(3, 4, 4.5),
+        num(4, 4, 40),
+        num(5, 4, 45383, date),
+        num(6, 4, -0, pct),
+      ],
+    },
     // Rows given out of order on purpose; the writer sorts them.
     {
       row0: 7,
-      cells: [str(0, 7, '=1+1'), str(1, 7, '+foo'), str(2, 7, '-5'), str(3, 7, '@x'), str(4, 7, 'Ünïcødé & <tags> "q" \u0001end'), { col0: 5, row0: 7, value: { type: 'boolean', value: true } }],
+      cells: [
+        str(0, 7, '=1+1'),
+        str(1, 7, '+foo'),
+        str(2, 7, '-5'),
+        str(3, 7, '@x'),
+        str(4, 7, 'Ünïcødé & <tags> "q" \u0001end'),
+        { col0: 5, row0: 7, value: { type: 'boolean', value: true } },
+        { col0: 6, row0: 7, value: { type: 'error', value: '#N/A' } },
+      ],
     },
-    { row0: 6, cells: [str(0, 6, 'Notes', { bold: true, italic: true, fontColorHex: 'C00000', numberFormat: '0.00' })] },
+    {
+      row0: 6,
+      cells: [str(0, 6, 'Notes', { bold: true, italic: true, fontColorHex: 'C00000', numberFormat: '0.00' })],
+    },
   ];
   const charts = o.charts ?? [chartSpecs.combo()];
   return {

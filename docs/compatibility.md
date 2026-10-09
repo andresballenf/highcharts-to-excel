@@ -62,6 +62,7 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | second and later plain `pie` series | approximated | `UNSUPPORTED_SERIES_TYPE` | Only the first pie is drawn. The others stay on the data sheet. |
 | `pie` + doughnut ring | approximated | `APPROXIMATED_CHART_TYPE` | The pie becomes the inner doughnut ring. |
 | doughnut ring `size` | approximated | `APPROXIMATED_LAYOUT` *(info)* | All rings have the same thickness. |
+| doughnut rings with different slice names | approximated | `APPROXIMATED_LAYOUT` | Rings share one category list: slice order follows the union of names, missing slices are empty. |
 | `series[i].endAngle` (semi-circle) | approximated | `APPROXIMATED_CHART_TYPE` | Drawn as a full circle. |
 | `series[i].startAngle` | native | none | `firstSliceAngle`. |
 | `series[i].innerSize` | native | none | Hole size clamped to 10-90%. |
@@ -72,10 +73,11 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | horizontal bars + line/area | approximated | `APPROXIMATED_CHART_TYPE` *(info)* | Lines follow the bar orientation. |
 | `series[i].stack` (several stack groups) | approximated | `APPROXIMATED_CHART_TYPE` | Merged into one stack per type and axis. |
 | `series[i].stacking` | native | none | `normal` → stacked, `percent` → 100% stacked. |
-| `series[i].groupPadding`, `pointPadding` | native | none | Mapped to gap width and overlap (stacked: overlap 100). |
+| mixed stacking within one type on one axis | approximated | `APPROXIMATED_CHART_TYPE` | One group with the majority's stacking (ties → stacked); reported on each other series' `stacking`. |
+| `series[i].groupPadding`, `pointPadding` | native | none | Mapped to gap width and overlap so bars keep the Highcharts width (stacked: overlap 100; gap width capped at 500). |
 | `series[i].borderRadius` (explicit) | approximated | `UNSUPPORTED_STYLE` *(info)* | Square corners. |
 | `chart.width`, `chart.height` / rendered size | native | none | Excel chart object size in pixels. Override with `chartWidth`/`chartHeight`. |
-| plot area box (`plotLeft/Top/Width/Height`) | approximated | `APPROXIMATED_LAYOUT` *(info)* | Pinned as a manual layout; not for pies; not in `fidelity: 'minimal'`. |
+| plot area box (`plotLeft/Top/Width/Height`) | approximated | `APPROXIMATED_LAYOUT` *(info)* | Pinned as a manual layout, clipped to the chart area; not for pies; not in `fidelity: 'minimal'`. |
 | `chart.backgroundColor`, `borderColor`/`borderWidth` | native | `UNRESOLVED_COLOR` if unparseable | |
 | `chart.plotBackgroundColor`, `plotBorderColor`/`plotBorderWidth` | native | `UNRESOLVED_COLOR` if unparseable | |
 | `chart.styledMode` | approximated | `STYLED_MODE_FALLBACK` | Real browser: computed SVG colors. Headless: palette by `colorIndex`; background white. |
@@ -110,7 +112,7 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | Highcharts option path | Outcome | Diagnostic code | Notes |
 | --- | --- | --- | --- |
 | `series[i].dataLabels.enabled` | native | none | Per-point `data[j].dataLabels.enabled: false` hides single labels. |
-| `dataLabels.format` (`{y}`, `{point.name}`, `{series.name}`, `{percentage}`, `{y:.1f}`…) | native / approximated | `APPROXIMATED_DATA_LABELS`, `UNSUPPORTED_NUMBER_FORMAT` | Mapped to show value, category, series name and percent plus an Excel number format. Literal text between parts becomes Excel's separator. |
+| `dataLabels.format` (`{y}`, `{point.name}`, `{series.name}`, `{percentage}`, `{y:.1f}`…) | native / approximated | `APPROXIMATED_DATA_LABELS`, `UNSUPPORTED_NUMBER_FORMAT` | Mapped to show value, category, series name and percent plus an Excel number format. Literal text between parts becomes Excel's separator. Percentages show only on pie/doughnut; elsewhere a percentage-only label shows the value instead. |
 | `dataLabels.formatter` | unsupported | `UNSUPPORTED_FORMATTER` | Excel shows the raw value. |
 | `dataLabels.align/verticalAlign/inside/distance` | native / approximated | `APPROXIMATED_DATA_LABELS` | Mapped to an Excel position. Positions that the Excel chart type does not allow use the default. Outside end on stacked bars becomes inside end. Area and doughnut cannot be positioned *(info)*. |
 | `dataLabels.style`, `backgroundColor`, `borderColor/Width` | native | `APPROXIMATED_FONT` for generic families | |
@@ -120,9 +122,12 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | Highcharts option path | Outcome | Diagnostic code | Notes |
 | --- | --- | --- | --- |
 | `xAxis.categories`, `type: 'category'` | native | none | Shared category column on the data sheet. |
-| `xAxis.type: 'datetime'` (whole days) | native | none | Excel date axis; base unit days, months (all month starts) or years (all January 1). |
+| `xAxis.type: 'datetime'` (whole days) | native | none | Excel date axis; base unit days, months (all month starts) or years (all January 1). Values are exported in the chart's displayed timezone (`time.timezone` / `useUTC`), so Excel shows the same wall-clock dates and times. |
+| `xAxis.type: 'datetime'` before 1899-12-31 | approximated | `APPROXIMATED_DATETIME` | Excel has no such dates: ISO date text on a category axis (scatter: plain day numbers). Dates before 1900-03-01 account for Excel's 1900 leap-year bug. |
 | `xAxis.type: 'datetime'` (intraday) | approximated | `APPROXIMATED_DATETIME` | Evenly spaced category axis with date-time labels. |
-| `series[i].pointIntervalUnit` | approximated | `APPROXIMATED_DATETIME` *(info)* | Calendar steps computed in UTC. |
+| `series[i].pointIntervalUnit` | approximated | `APPROXIMATED_DATETIME` *(info)* | Calendar steps from `pointStart` on the displayed dates; month-end dates may differ from Highcharts' step-from-previous-point. |
+| `time.timezone`, `time.useUTC: false`, `time.timezoneOffset` (non-UTC) | approximated | `APPROXIMATED_DATETIME` *(info)*, property `time.timezone` | Each datetime x value (and datetime x-axis bound) moves to the wall-clock time the chart displays; the first point's offset is `meta.datetimeOffsetMinutes`. An unknown zone name is exported as UTC (warning, `datetimeOffsetMinutes: null`). |
+| date strings on a datetime axis (`['2024-01-01', 1]`, `x: '2024-01-01'`, `pointStart: '2024-01-01'`) | translated | `NON_NUMERIC_VALUE` when not a date | Parsed as the chart's wall-clock time (with `Z`/`±hh:mm`: as that instant). |
 | `xAxis.type: 'linear'`, uneven x (line/column) | approximated | `APPROXIMATED_AXIS_SCALE` | Categories are evenly spaced. |
 | `xAxis.type: 'logarithmic'` (line/column) | approximated | `APPROXIMATED_AXIS_SCALE` | Evenly spaced categories. |
 | `yAxis.type: 'logarithmic'`, scatter `xAxis` log | native | none | `logBase` 10. |
@@ -148,12 +153,13 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 
 | Highcharts option path | Outcome | Diagnostic code | Notes |
 | --- | --- | --- | --- |
-| `legend.enabled` | native | none | Off when no series shows in the legend (pies default to `showInLegend: false`). |
+| `legend.enabled` | native | none | Off when no **exported** series shows in the legend (pies default to `showInLegend: false`; hidden series left out with `seriesVisibility: 'visible'` do not count). |
 | `legend.align`/`verticalAlign`: bottom, top, left, right, top-right | native | none | |
 | top-left, bottom-left, bottom-right | approximated | `APPROXIMATED_LEGEND_POSITION` | Centered at top or bottom. |
 | centered over the plot (`verticalAlign: 'middle'`, `align: 'center'`) | approximated | `APPROXIMATED_LEGEND_POSITION` *(info)* | Placed at the right. |
 | `legend.floating` | native | none | Overlay. |
 | `legend.reversed` | unsupported | `UNSUPPORTED_STYLE` *(info)* | |
+| `series[i].showInLegend: false` | native | none | Legend entry deleted (`c:legendEntry`); not for pie slices. |
 | `legend.itemStyle`, `backgroundColor`, `borderColor/Width` | native | `APPROXIMATED_FONT` | |
 
 ## Fonts and numbers
@@ -171,12 +177,17 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | grouped data (Stock `dataGrouping`) in `rendered` mode | approximated | `DATA_GROUPED` *(info)* | Grouped points exported; counts in `details`. |
 | cropped points (zoom, navigator) in `rendered` mode | approximated | `DATA_CROPPED` *(info)* | |
 | `raw` mode without source data | approximated | `DATA_MODE_FALLBACK` | Rendered points exported. |
+| `rendered` mode, series with no rendered points (never drawn) | approximated | `DATA_MODE_FALLBACK` *(info)* | Source data exported; `dataSemantics.mode` is `'raw'`. |
+| boosted series (`modules/boost`) | approximated | `DATA_MODE_FALLBACK` *(info)*, property `series[i].boostThreshold` | `series.points` hold pixels only; values come from the processed data columns (or `options.data`). |
+| `series[i].keys`, `relativeXValue`, typed-array `data` (raw / options path) | translated | none | Mapped as Highcharts' `Point.optionsToObject` does. |
 | hidden series, `seriesVisibility: 'visible'` | translated | `HIDDEN_SERIES_EXCLUDED` *(info)* | |
 | hidden series, `seriesVisibility: 'all'` | approximated | `HIDDEN_SERIES_INCLUDED` *(info)* | Visible in Excel. |
 | hidden pie slice | approximated | `HIDDEN_POINT` *(info)* | Shown in Excel. |
 | `null` y values | translated | `NULL_VALUES` *(info)* | Empty cells, drawn as gaps. |
-| series missing a shared x value | approximated | `UNALIGNED_X_VALUES` | Empty cell. |
-| non-numeric values / unknown point shapes | approximated | `NON_NUMERIC_VALUE` | Skipped or left empty, never guessed. |
+| series missing a shared x value | approximated | `UNALIGNED_X_VALUES` *(info)* | `#N/A` cell (null in the chart cache), so lines and areas stay connected as in Highcharts; real `null` points stay empty cells (gaps). |
+| x between or beyond the categories of a category axis (e.g. `x: 0.5`, `x: -1`) | approximated | `UNALIGNED_X_VALUES` | Each such x becomes its own category row; never mapped onto a category by position. |
+| two points of one series at the same x | approximated | `UNALIGNED_X_VALUES` | The first point is kept; the repeats stay out of the chart (`details.duplicates`). |
+| non-numeric values / unknown point shapes | approximated | `NON_NUMERIC_VALUE` | Skipped or left empty, never guessed. Reported once per series (`details.count`, `details.firstIndices`); per-point data-label diagnostics are aggregated the same way. |
 | empty series | translated | `EMPTY_SERIES` *(info)* | |
 | no series or no data | blocking | `EMPTY_CHART` | |
 | more than 1,048,576 rows / 16,384 columns | blocking | `ROW_LIMIT_EXCEEDED` / `COLUMN_LIMIT_EXCEEDED` | |

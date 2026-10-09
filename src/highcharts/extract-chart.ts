@@ -5,14 +5,32 @@
  * runtime objects when available) and share every parsing step after that.
  */
 
-import { createEmptyChartModel, type AxisModel, type ChartMeta, type ChartModel, type SeriesModel } from '../types/chart-model';
+import {
+  createEmptyChartModel,
+  type AxisModel,
+  type ChartMeta,
+  type ChartModel,
+  type SeriesModel,
+} from '../types/chart-model';
 import type { DiagnosticCollector } from '../types/diagnostics';
 import { ExportError, type DataMode, type SeriesVisibilityMode } from '../types/public-api';
 import { createCssVariableResolver } from './css-resolver';
 import { extractAxes, isInternalAxis } from './extract-axes';
 import { computeBaseFont, extractChartStyles, extractPalette } from './extract-styles';
 import { extractSeries } from './extract-series';
-import { arr, deepMerge, get, getHighchartsVersion, isHighchartsChart, isRealBrowser, num, rec, str, type Rec } from './guards';
+import { DatetimeShifter, timeZoneFromChart, timeZoneFromOptions } from './extract-time';
+import {
+  arr,
+  deepMerge,
+  get,
+  getHighchartsVersion,
+  isHighchartsChart,
+  isRealBrowser,
+  num,
+  rec,
+  str,
+  type Rec,
+} from './guards';
 import type { AxisView, ChartView, ExtractContext, HcAxisLike, HcChartLike, HcSeriesLike, SeriesView } from './types';
 
 export interface ExtractOptions {
@@ -59,7 +77,7 @@ function isInternalSeries(s: HcSeriesLike | Rec | undefined): boolean {
   const o = rec(rt.options) ?? (s as Rec);
   if (o.isInternal === true) return true;
   const cls = str(o.className);
-  if (cls !== undefined && cls.includes('navigator')) return true;
+  if (cls?.includes('navigator')) return true;
   return rt.baseSeries !== undefined && rt.baseSeries !== null;
 }
 
@@ -101,14 +119,24 @@ function viewFromChart(chart: HcChartLike, extract: ExtractOptions): ChartView {
 
   view.width = num(extract.chartWidth) ?? num(chart.chartWidth) ?? 600;
   view.height = num(extract.chartHeight) ?? num(chart.chartHeight) ?? 400;
-  const [left, top, width, height] = [num(chart.plotLeft), num(chart.plotTop), num(chart.plotWidth), num(chart.plotHeight)];
-  view.plotBox = left !== undefined && top !== undefined && width !== undefined && height !== undefined ? { left, top, width, height } : null;
+  const [left, top, width, height] = [
+    num(chart.plotLeft),
+    num(chart.plotTop),
+    num(chart.plotWidth),
+    num(chart.plotHeight),
+  ];
+  view.plotBox =
+    left !== undefined && top !== undefined && width !== undefined && height !== undefined
+      ? { left, top, width, height }
+      : null;
   view.inverted = chart.inverted === true;
   view.polar = chart.polar === true;
 
   const series = chart.series.filter((s) => !isInternalSeries(s));
   view.cartesian =
-    typeof chart.hasCartesianSeries === 'boolean' ? chart.hasCartesianSeries : series.some((s) => !NON_CARTESIAN_TYPES.has(str(s.type) ?? 'line'));
+    typeof chart.hasCartesianSeries === 'boolean'
+      ? chart.hasCartesianSeries
+      : series.some((s) => !NON_CARTESIAN_TYPES.has(str(s.type) ?? 'line'));
 
   const axisViews = (which: 'x' | 'y', list: HcAxisLike[]): AxisView[] =>
     view.cartesian
@@ -146,7 +174,11 @@ function viewFromChart(chart: HcChartLike, extract: ExtractOptions): ChartView {
       yAxis: Math.max(0, yIdx),
       colorIndex: num(s.colorIndex) ?? num(sOpts.colorIndex) ?? index,
       // Pie-like series keep a placeholder runtime color (#cccccc for empty pies); only an explicit one counts.
-      explicitColor: view.styledMode ? undefined : BY_POINT_TYPES.has(type) ? get(s.userOptions, 'color') : (s.color ?? sOpts.color),
+      explicitColor: view.styledMode
+        ? undefined
+        : BY_POINT_TYPES.has(type)
+          ? get(s.userOptions, 'color')
+          : (s.color ?? sOpts.color),
       symbol: s.symbol,
     };
   });
@@ -183,7 +215,12 @@ function viewFromOptions(options: Rec, extract: ExtractOptions): ChartView {
   // chart.height may be a percentage of the width.
   const h = c.height;
   const pct = typeof h === 'string' ? /^\s*(\d*\.?\d+)\s*%\s*$/.exec(h) : null;
-  view.height = num(extract.chartHeight) ?? num(h) ?? (pct ? (Number(pct[1]) / 100) * width : undefined) ?? (typeof h === 'string' ? num(parseFloat(h)) : undefined) ?? 400;
+  view.height =
+    num(extract.chartHeight) ??
+    num(h) ??
+    (pct ? (Number(pct[1]) / 100) * width : undefined) ??
+    (typeof h === 'string' ? num(parseFloat(h)) : undefined) ??
+    400;
   view.polar = c.polar === true;
 
   const chartType = str(c.type) ?? 'line';
@@ -269,7 +306,12 @@ function hasUserFunction(x: unknown): boolean {
 
 function chartLevelDiagnostics(view: ChartView, series: SeriesView[], diagnostics: DiagnosticCollector): void {
   if (get(view.opts, 'chart', 'options3d', 'enabled') === true) {
-    diagnostics.report('UNSUPPORTED_3D', 'approximated', 'chart.options3d', '3D charts are exported as flat 2D charts.');
+    diagnostics.report(
+      'UNSUPPORTED_3D',
+      'approximated',
+      'chart.options3d',
+      '3D charts are exported as flat 2D charts.',
+    );
   }
 
   // Only developer-supplied callbacks count (Highcharts' built-in defaults live in merged options).
@@ -278,25 +320,74 @@ function chartLevelDiagnostics(view: ChartView, series: SeriesView[], diagnostic
   if (hasUserFunction(tooltip.formatter)) tooltipProperty = 'tooltip.formatter';
   else if (hasUserFunction(tooltip.pointFormatter)) tooltipProperty = 'tooltip.pointFormatter';
   else {
-    const s = series.find((sv) => hasUserFunction(get(sv.userOpts, 'tooltip', 'pointFormatter')) || hasUserFunction(get(sv.userOpts, 'tooltip', 'formatter')));
+    const s = series.find(
+      (sv) =>
+        hasUserFunction(get(sv.userOpts, 'tooltip', 'pointFormatter')) ||
+        hasUserFunction(get(sv.userOpts, 'tooltip', 'formatter')),
+    );
     if (s) tooltipProperty = `${s.path}.tooltip.pointFormatter`;
   }
   if (tooltipProperty !== null) {
-    diagnostics.report('UNSUPPORTED_TOOLTIP', 'unsupported', tooltipProperty, 'Tooltip formatters are interactive and are not exported.', { severity: 'info' });
+    diagnostics.report(
+      'UNSUPPORTED_TOOLTIP',
+      'unsupported',
+      tooltipProperty,
+      'Tooltip formatters are interactive and are not exported.',
+      { severity: 'info' },
+    );
   }
 
   const annotations = view.opts.annotations;
   const count = arr(annotations)?.length ?? (rec(annotations) ? 1 : 0);
   if (count > 0) {
-    diagnostics.report('UNSUPPORTED_ANNOTATION', 'unsupported', 'annotations', 'Annotations have no Excel chart equivalent and are omitted.', {
-      details: { count },
-    });
+    diagnostics.report(
+      'UNSUPPORTED_ANNOTATION',
+      'unsupported',
+      'annotations',
+      'Annotations have no Excel chart equivalent and are omitted.',
+      {
+        details: { count },
+      },
+    );
   }
 }
 
-function buildModel(view: ChartView, meta: ChartMeta, extract: ExtractOptions): ChartModel {
+/** Reports how datetime x values were moved to the chart's displayed time zone. */
+function reportTimeZone(time: DatetimeShifter, diagnostics: DiagnosticCollector): void {
+  const offsetMinutes = time.offsetMinutes();
+  if (time.unresolved) {
+    diagnostics.report(
+      'APPROXIMATED_DATETIME',
+      'approximated',
+      'time.timezone',
+      `The chart time zone "${time.zone.label}" could not be resolved; datetime values are exported as UTC.`,
+      { details: { timezone: time.zone.label } },
+    );
+  } else if (time.shifted) {
+    diagnostics.report(
+      'APPROXIMATED_DATETIME',
+      'approximated',
+      'time.timezone',
+      `Excel has no time zones: datetime values are exported as the wall-clock times the chart shows in "${time.zone.label}".`,
+      { severity: 'info', details: { timezone: time.zone.label, offsetMinutes } },
+    );
+  }
+}
+
+function buildModel(
+  view: ChartView,
+  baseMeta: Omit<ChartMeta, 'datetimeOffsetMinutes'>,
+  extract: ExtractOptions,
+): ChartModel {
   const { diagnostics } = extract;
-  const ctx: ExtractContext = { view, diagnostics, dataMode: extract.dataMode, seriesVisibility: extract.seriesVisibility };
+  const time = new DatetimeShifter(view.rt ? timeZoneFromChart(view.rt) : timeZoneFromOptions(view.opts));
+  const ctx: ExtractContext = {
+    view,
+    diagnostics,
+    dataMode: extract.dataMode,
+    seriesVisibility: extract.seriesVisibility,
+    time,
+  };
 
   const styles = extractChartStyles(view, diagnostics);
   const xAxes = extractAxes(ctx, 'x');
@@ -305,11 +396,19 @@ function buildModel(view: ChartView, meta: ChartMeta, extract: ExtractOptions): 
   fillExtremesFromPoints(xAxes, series, 'x');
   fillExtremesFromPoints(yAxes, series, 'y');
   chartLevelDiagnostics(view, view.series, diagnostics);
+  reportTimeZone(time, diagnostics);
+  const meta: ChartMeta = { ...baseMeta, datetimeOffsetMinutes: time.offsetMinutes() };
 
   if (series.length === 0 || series.every((s) => s.points.length === 0)) {
-    diagnostics.report('EMPTY_CHART', 'blocking', 'series', view.series.length === 0 ? 'The chart has no series.' : 'The chart has no data to export.', {
-      details: { sourceSeries: view.series.length, exportedSeries: series.length },
-    });
+    diagnostics.report(
+      'EMPTY_CHART',
+      'blocking',
+      'series',
+      view.series.length === 0 ? 'The chart has no series.' : 'The chart has no data to export.',
+      {
+        details: { sourceSeries: view.series.length, exportedSeries: series.length },
+      },
+    );
   }
 
   const model = createEmptyChartModel(meta);
@@ -322,7 +421,8 @@ function buildModel(view: ChartView, meta: ChartMeta, extract: ExtractOptions): 
   model.plotArea = styles.plotArea;
   model.title = styles.title;
   model.subtitle = styles.subtitle;
-  model.legend = styles.legend;
+  // The legend is drawn only when an exported series has a legend item.
+  model.legend = { ...styles.legend, enabled: styles.legend.enabled && series.some((s) => s.showInLegend) };
   model.xAxes = xAxes;
   model.yAxes = yAxes;
   model.series = series;
@@ -331,15 +431,22 @@ function buildModel(view: ChartView, meta: ChartMeta, extract: ExtractOptions): 
   return model;
 }
 
-/** Extracts the IR from a live (rendered) Highcharts chart. Never mutates the chart. */
+/**
+ * Extracts the IR from a live (rendered) Highcharts chart. Never mutates the chart.
+ *
+ * @experimental The IR and this entry point may change in minor versions.
+ */
 export function extractChartModel(chart: unknown, options: ExtractOptions): ChartModel {
   if (!isHighchartsChart(chart)) {
-    throw new ExportError('INVALID_CHART', 'Expected a rendered Highcharts chart instance (with series, axes, options and a container).');
+    throw new ExportError(
+      'INVALID_CHART',
+      'Expected a rendered Highcharts chart instance (with series, axes, options and a container).',
+    );
   }
   const view = viewFromChart(chart, options);
   const renderToId = str(get(chart.renderTo, 'id'));
   const containerId = str(get(chart.container, 'id'));
-  const meta: ChartMeta = {
+  const meta: Omit<ChartMeta, 'datetimeOffsetMinutes'> = {
     sourceLibrary: 'highcharts',
     sourceVersion: options.highchartsVersion !== undefined ? options.highchartsVersion : getHighchartsVersion(chart),
     sourceChartType: str(get(view.userOpts, 'chart', 'type')) ?? view.series[0]?.type ?? 'line',
@@ -353,14 +460,17 @@ export function extractChartModel(chart: unknown, options: ExtractOptions): Char
 /**
  * Server-side path: extracts the IR from a plain Highcharts options object (no rendering).
  * Data is the raw `series[i].data`; sizes come from `chart.width/height` (default 600×400).
+ *
+ * @experimental The IR and this entry point may change in minor versions.
  */
 export function extractChartModelFromOptions(options: object, extract: ExtractOptions): ChartModel {
   const opts = rec(options);
   if (!opts) throw new ExportError('INVALID_OPTIONS', 'Expected a Highcharts options object.');
   const view = viewFromOptions(opts, extract);
-  const meta: ChartMeta = {
+  const meta: Omit<ChartMeta, 'datetimeOffsetMinutes'> = {
     sourceLibrary: 'highcharts',
-    sourceVersion: extract.highchartsVersion !== undefined ? extract.highchartsVersion : getHighchartsVersion(undefined),
+    sourceVersion:
+      extract.highchartsVersion !== undefined ? extract.highchartsVersion : getHighchartsVersion(undefined),
     sourceChartType: str(get(opts, 'chart', 'type')) ?? view.series[0]?.type ?? 'line',
     extraction: 'headless',
     styledMode: view.styledMode,

@@ -87,6 +87,7 @@ export function series(partial: Partial<SeriesModel> & Pick<SeriesModel, 'kind'>
     name: `Series ${index + 1}`,
     sourceType: partial.kind,
     visible: true,
+    showInLegend: true,
     xAxisIndex: 0,
     yAxisIndex: 0,
     color,
@@ -102,7 +103,13 @@ export function series(partial: Partial<SeriesModel> & Pick<SeriesModel, 'kind'>
     bars: null,
     pie: null,
     yFormat: null,
-    dataSemantics: { mode: 'rendered', grouped: false, cropped: false, sourcePointCount: points.length, renderedPointCount: points.length },
+    dataSemantics: {
+      mode: 'rendered',
+      grouped: false,
+      cropped: false,
+      sourcePointCount: points.length,
+      renderedPointCount: points.length,
+    },
     ...partial,
     points,
   };
@@ -130,13 +137,28 @@ export function baseModel(partial: Partial<ChartModel> = {}): ChartModel {
   const m = createEmptyChartModel({
     sourceLibrary: 'highcharts',
     sourceVersion: '13.1.1',
+    datetimeOffsetMinutes: 0,
     sourceChartType: 'line',
     extraction: 'headless',
     styledMode: false,
     chartId: null,
   });
-  m.xAxes = [axis({ index: 0, kind: 'category', categories: [...MONTHS], tickMarks: { color: rgb('#ccd6eb'), width: 1, dash: 'solid' } })];
-  m.yAxes = [axis({ index: 0, kind: 'linear', title: text('Values'), gridLines: { color: rgb('#e6e6e6'), width: 1, dash: 'solid' } })];
+  m.xAxes = [
+    axis({
+      index: 0,
+      kind: 'category',
+      categories: [...MONTHS],
+      tickMarks: { color: rgb('#ccd6eb'), width: 1, dash: 'solid' },
+    }),
+  ];
+  m.yAxes = [
+    axis({
+      index: 0,
+      kind: 'linear',
+      title: text('Values'),
+      gridLines: { color: rgb('#e6e6e6'), width: 1, dash: 'solid' },
+    }),
+  ];
   m.colors = [...PALETTE];
   return { ...m, ...partial };
 }
@@ -162,7 +184,13 @@ export function multiSeriesLineModel(): ChartModel {
   const m = baseModel({
     series: [
       series({ kind: 'line', index: 0, name: 'A', points: [1, 2, 4].map((x, i) => point({ x, y: 10 + i })) }),
-      series({ kind: 'spline', index: 1, name: 'B', smooth: true, points: [2, 3, 4].map((x, i) => point({ x, y: 20 + i })) }),
+      series({
+        kind: 'spline',
+        index: 1,
+        name: 'B',
+        smooth: true,
+        points: [2, 3, 4].map((x, i) => point({ x, y: 20 + i })),
+      }),
     ],
   });
   m.xAxes = [axis({ index: 0, kind: 'linear' })];
@@ -174,7 +202,15 @@ export function columnStackedModel(): ChartModel {
   return baseModel({
     meta: { ...baseModel().meta, sourceChartType: 'column' },
     series: [
-      series({ kind: 'column', index: 0, name: 'North', stacking: 'normal', bars, points: pts([1, 2, 3, 4]), dataLabels: labels({ position: 'outsideEnd' }) }),
+      series({
+        kind: 'column',
+        index: 0,
+        name: 'North',
+        stacking: 'normal',
+        bars,
+        points: pts([1, 2, 3, 4]),
+        dataLabels: labels({ position: 'outsideEnd' }),
+      }),
       series({ kind: 'column', index: 1, name: 'South', stacking: 'normal', bars, points: pts([4, 3, 2, 1]) }),
     ],
   });
@@ -221,7 +257,9 @@ export function pieModel(): ChartModel {
         pie: { innerSize: 0, startAngle: -90, endAngle: null },
         border: { color: rgb('#ffffff'), width: 1, dash: 'solid' },
         dataLabels: labels({ showValue: false, showCategoryName: true, position: 'outsideEnd' }),
-        points: names.map((name, i) => point({ name, y: [60, 15, 15, 10][i]!, color: PALETTE[i]!, sliced: i === 1 ? 10 : null })),
+        points: names.map((name, i) =>
+          point({ name, y: [60, 15, 15, 10][i]!, color: PALETTE[i]!, sliced: i === 1 ? 10 : null }),
+        ),
       }),
     ],
   });
@@ -257,8 +295,22 @@ export function doughnutModel(): ChartModel {
 export function scatterModel(): ChartModel {
   const m = baseModel({
     series: [
-      series({ kind: 'scatter', index: 0, name: 'Men', points: [[1, 2], [3, 4], [5, 6]].map(([x, y]) => point({ x: x!, y: y! })) }),
-      series({ kind: 'scatter', index: 1, name: 'Women', points: [[1.5, 2.5]].map(([x, y]) => point({ x: x!, y: y! })) }),
+      series({
+        kind: 'scatter',
+        index: 0,
+        name: 'Men',
+        points: [
+          [1, 2],
+          [3, 4],
+          [5, 6],
+        ].map(([x, y]) => point({ x: x!, y: y! })),
+      }),
+      series({
+        kind: 'scatter',
+        index: 1,
+        name: 'Women',
+        points: [[1.5, 2.5]].map(([x, y]) => point({ x: x!, y: y! })),
+      }),
     ],
   });
   m.xAxes = [axis({ index: 0, kind: 'linear', title: text('Height') })];
@@ -273,10 +325,7 @@ export function bubbleModel(): ChartModel {
         index: 0,
         name: 'Countries',
         fillOpacity: 0.5,
-        points: [
-          point({ x: 1, y: 2, z: 10 }),
-          point({ x: 2, y: 3, z: 20 }),
-        ],
+        points: [point({ x: 1, y: 2, z: 10 }), point({ x: 2, y: 3, z: 20 })],
       }),
     ],
   });
@@ -289,7 +338,14 @@ export const DAY = 86_400_000;
 export function datetimeModel(): ChartModel {
   const t0 = Date.UTC(2024, 0, 1);
   const m = baseModel({
-    series: [series({ kind: 'line', index: 0, name: 'Temp', points: [0, 1, 2, 3].map((d) => point({ x: t0 + d * DAY, y: 10 + d })) })],
+    series: [
+      series({
+        kind: 'line',
+        index: 0,
+        name: 'Temp',
+        points: [0, 1, 2, 3].map((d) => point({ x: t0 + d * DAY, y: 10 + d })),
+      }),
+    ],
   });
   m.xAxes = [axis({ index: 0, kind: 'datetime', tickInterval: 2 * DAY })];
   return m;
@@ -299,7 +355,13 @@ export function comboModel(): ChartModel {
   return baseModel({
     series: [
       series({ kind: 'column', index: 0, name: 'Rainfall', points: pts([49.9, 71.5, 106.4, 129.2]) }),
-      series({ kind: 'line', index: 1, name: 'Average', points: pts([60, 70, 80, 90]), line: { color: null, width: 3, dash: 'dash' } }),
+      series({
+        kind: 'line',
+        index: 1,
+        name: 'Average',
+        points: pts([60, 70, 80, 90]),
+        line: { color: null, width: 3, dash: 'dash' },
+      }),
     ],
   });
 }
@@ -308,11 +370,23 @@ export function secondaryAxisModel(): ChartModel {
   const m = baseModel({
     series: [
       series({ kind: 'column', index: 0, name: 'Rainfall', points: pts([49.9, 71.5, 106.4, 129.2]) }),
-      series({ kind: 'spline', index: 1, name: 'Temperature', yAxisIndex: 1, smooth: true, points: pts([7, 6.9, 9.5, 14.5]) }),
+      series({
+        kind: 'spline',
+        index: 1,
+        name: 'Temperature',
+        yAxisIndex: 1,
+        smooth: true,
+        points: pts([7, 6.9, 9.5, 14.5]),
+      }),
     ],
   });
   m.yAxes = [
-    axis({ index: 0, kind: 'linear', title: text('Rainfall (mm)'), labels: { enabled: true, font: null, format: { kind: 'excel', code: '0" mm"' }, rotation: 0 } }),
+    axis({
+      index: 0,
+      kind: 'linear',
+      title: text('Rainfall (mm)'),
+      labels: { enabled: true, font: null, format: { kind: 'excel', code: '0" mm"' }, rotation: 0 },
+    }),
     axis({ index: 1, kind: 'linear', title: text('Temperature (°C)'), opposite: true }),
   ];
   return m;
@@ -324,9 +398,20 @@ export function styledModel(): ChartModel {
     height: 500,
     title: text('Styled', { family: '"Open Sans", sans-serif', size: 20, bold: true, color: rgb('#112233') }),
     subtitle: text('Second line', { size: 12 }),
-    background: { type: 'gradient', angle: 90, stops: [{ offset: 0, color: rgb('#ffffff') }, { offset: 1, color: rgb('#dddddd') }] },
+    background: {
+      type: 'gradient',
+      angle: 90,
+      stops: [
+        { offset: 0, color: rgb('#ffffff') },
+        { offset: 1, color: rgb('#dddddd') },
+      ],
+    },
     border: { color: rgb('#333333'), width: 2, dash: 'solid' },
-    plotArea: { background: { type: 'solid', color: rgb('#fafafa') }, border: null, box: { left: 80, top: 60, width: 600, height: 350 } },
+    plotArea: {
+      background: { type: 'solid', color: rgb('#fafafa') },
+      border: null,
+      box: { left: 80, top: 60, width: 600, height: 350 },
+    },
     legend: {
       enabled: true,
       position: 'right',
@@ -344,7 +429,11 @@ export function styledModel(): ChartModel {
         name: 'Styled',
         color: rgb('#ff0000'),
         border: { color: rgb('#000000'), width: 1, dash: 'solid' },
-        dataLabels: labels({ position: 'outsideEnd', font: font({ size: 10, bold: true }), format: { kind: 'excel', code: '0.0' } }),
+        dataLabels: labels({
+          position: 'outsideEnd',
+          font: font({ size: 10, bold: true }),
+          format: { kind: 'excel', code: '0.0' },
+        }),
         points: pts([1, 2, 3, 4]).map((p, i) => (i === 2 ? { ...p, color: rgb('#00ff00') } : p)),
       }),
     ],
@@ -371,7 +460,12 @@ export function nullNegativeModel(): ChartModel {
         kind: 'column',
         index: 0,
         name: 'Delta',
-        points: [point({ x: 0, y: 5 }), point({ x: 1, y: null, isNull: true }), point({ x: 2, y: -3 }), point({ x: 3, y: 7 })],
+        points: [
+          point({ x: 0, y: 5 }),
+          point({ x: 1, y: null, isNull: true }),
+          point({ x: 2, y: -3 }),
+          point({ x: 3, y: 7 }),
+        ],
       }),
     ],
   });

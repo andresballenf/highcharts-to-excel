@@ -7,6 +7,7 @@
 import type { NumberFormat } from '../types/chart-model';
 import { createDiagnostic, type Diagnostic } from '../types/diagnostics';
 import { highchartsDateFormatToExcel } from '../utils/dates';
+import { excelFormatCodeProblem } from '../utils/format-code';
 
 export interface FormatContext {
   kind: 'axisLabel' | 'dataLabel' | 'tooltip' | 'value';
@@ -51,7 +52,11 @@ function escapeAffix(text: string): string {
     }
   });
   if (first === -1) return text;
-  return chars.slice(0, first).join('') + escapeExcelLiteral(chars.slice(first, last + 1).join('')) + chars.slice(last + 1).join('');
+  return (
+    chars.slice(0, first).join('') +
+    escapeExcelLiteral(chars.slice(first, last + 1).join('')) +
+    chars.slice(last + 1).join('')
+  );
 }
 
 function numberCore(decimals: number | null, thousands: boolean): string {
@@ -140,6 +145,35 @@ function isFiniteNumber(v: unknown): v is number {
  * plus data-label content switches.
  */
 export function translateFormatString(format: unknown, formatter: unknown, ctx: FormatContext): TranslatedFormat {
+  const r = translateFormatStringUnchecked(format, formatter, ctx);
+  if (r.format?.kind !== 'excel') return r;
+  const problem = excelFormatCodeProblem(r.format.code);
+  if (problem === null) return r;
+  // Excel refuses codes that break its structural rules (e.g. longer than 255 characters).
+  const property = `${ctx.property}.${ctx.kind === 'tooltip' ? 'pointFormat' : 'format'}`;
+  const fallback: NumberFormat =
+    r.format.source !== undefined
+      ? { kind: 'excel', code: 'General', source: r.format.source }
+      : { kind: 'excel', code: 'General' };
+  return {
+    ...r,
+    format: fallback,
+    diagnostics: [
+      ...r.diagnostics,
+      createDiagnostic(
+        'UNSUPPORTED_NUMBER_FORMAT',
+        'unsupported',
+        property,
+        `The Excel number format for this label is invalid (${problem}); General is used.`,
+        {
+          details: { code: r.format.code.slice(0, 300) },
+        },
+      ),
+    ],
+  };
+}
+
+function translateFormatStringUnchecked(format: unknown, formatter: unknown, ctx: FormatContext): TranslatedFormat {
   const isDataLabel = ctx.kind === 'dataLabel';
   const formatProperty = `${ctx.property}.${ctx.kind === 'tooltip' ? 'pointFormat' : 'format'}`;
   const source = typeof format === 'string' ? format : undefined;
@@ -171,20 +205,33 @@ export function translateFormatString(format: unknown, formatter: unknown, ctx: 
   const separatorDiagnostics = (thousands: boolean, decimals: number): void => {
     if (thousands && ctx.thousandsSep !== undefined && ctx.thousandsSep !== ',') {
       diagnostics.push(
-        createDiagnostic('APPROXIMATED_NUMBER_FORMAT', 'approximated', 'lang.thousandsSep', 'Excel uses the viewer\'s locale thousands separator.', {
-          details: { thousandsSep: ctx.thousandsSep },
-        }),
+        createDiagnostic(
+          'APPROXIMATED_NUMBER_FORMAT',
+          'approximated',
+          'lang.thousandsSep',
+          "Excel uses the viewer's locale thousands separator.",
+          {
+            details: { thousandsSep: ctx.thousandsSep },
+          },
+        ),
       );
     }
     if (decimals > 0 && ctx.decimalPoint !== undefined && ctx.decimalPoint !== '.') {
       diagnostics.push(
-        createDiagnostic('APPROXIMATED_NUMBER_FORMAT', 'approximated', 'lang.decimalPoint', 'Excel uses the viewer\'s locale decimal separator.', {
-          details: { decimalPoint: ctx.decimalPoint },
-        }),
+        createDiagnostic(
+          'APPROXIMATED_NUMBER_FORMAT',
+          'approximated',
+          'lang.decimalPoint',
+          "Excel uses the viewer's locale decimal separator.",
+          {
+            details: { decimalPoint: ctx.decimalPoint },
+          },
+        ),
       );
     }
   };
-  const ctxDecimals = isFiniteNumber(ctx.valueDecimals) && ctx.valueDecimals >= 0 ? Math.round(ctx.valueDecimals) : null;
+  const ctxDecimals =
+    isFiniteNumber(ctx.valueDecimals) && ctx.valueDecimals >= 0 ? Math.round(ctx.valueDecimals) : null;
   const ctxPrefix = ctx.valuePrefix ?? '';
   const ctxSuffix = ctx.valueSuffix ?? '';
 
@@ -197,7 +244,14 @@ export function translateFormatString(format: unknown, formatter: unknown, ctx: 
       fmt = { kind: 'excel', code: decimalsToExcelCode(ctxDecimals, thousands, ctxPrefix, ctxSuffix) };
       separatorDiagnostics(thousands, ctxDecimals ?? 0);
     }
-    return { format: fmt, showValue: true, showCategoryName: false, showSeriesName: false, showPercentage: false, diagnostics };
+    return {
+      format: fmt,
+      showValue: true,
+      showCategoryName: false,
+      showSeriesName: false,
+      showPercentage: false,
+      diagnostics,
+    };
   }
 
   const segments = tokenize(stripHtml(source));
@@ -214,9 +268,15 @@ export function translateFormatString(format: unknown, formatter: unknown, ctx: 
     if (bad) {
       return unsupported(
         `Format token ${bad.seg.raw} has no Excel equivalent`,
-        createDiagnostic('UNSUPPORTED_NUMBER_FORMAT', 'unsupported', formatProperty, `Format token ${bad.seg.raw} cannot be represented in Excel.`, {
-          details: { format: source, token: bad.seg.raw },
-        }),
+        createDiagnostic(
+          'UNSUPPORTED_NUMBER_FORMAT',
+          'unsupported',
+          formatProperty,
+          `Format token ${bad.seg.raw} cannot be represented in Excel.`,
+          {
+            details: { format: source, token: bad.seg.raw },
+          },
+        ),
       );
     }
   }
@@ -236,9 +296,15 @@ export function translateFormatString(format: unknown, formatter: unknown, ctx: 
     if (content.length === 0 && ctx.kind !== 'tooltip') {
       return unsupported(
         'Format has no value placeholder',
-        createDiagnostic('UNSUPPORTED_NUMBER_FORMAT', 'unsupported', formatProperty, 'Constant label text cannot be represented as an Excel number format.', {
-          details: { format: source },
-        }),
+        createDiagnostic(
+          'UNSUPPORTED_NUMBER_FORMAT',
+          'unsupported',
+          formatProperty,
+          'Constant label text cannot be represented as an Excel number format.',
+          {
+            details: { format: source },
+          },
+        ),
       );
     }
     if (isDataLabel) reportDroppedLiterals(segments, diagnostics, formatProperty, source);
@@ -277,9 +343,15 @@ export function translateFormatString(format: unknown, formatter: unknown, ctx: 
       if (!m) {
         return unsupported(
           `Percentage format "${spec}" has no Excel equivalent`,
-          createDiagnostic('UNSUPPORTED_NUMBER_FORMAT', 'unsupported', formatProperty, `Format specifier "${spec}" cannot be represented in Excel.`, {
-            details: { format: source },
-          }),
+          createDiagnostic(
+            'UNSUPPORTED_NUMBER_FORMAT',
+            'unsupported',
+            formatProperty,
+            `Format specifier "${spec}" cannot be represented in Excel.`,
+            {
+              details: { format: source },
+            },
+          ),
         );
       }
       decimals = m[2] !== undefined ? Number(m[2]) : 0;
@@ -296,14 +368,20 @@ export function translateFormatString(format: unknown, formatter: unknown, ctx: 
   } else {
     prefix += ctxPrefix;
     suffix = ctxSuffix + suffix;
-    if (spec !== undefined && spec.includes('%')) {
+    if (spec?.includes('%')) {
       const date = highchartsDateFormatToExcel(spec);
       if (date.kind === 'unsupported') {
         return unsupported(
           date.reason,
-          createDiagnostic('UNSUPPORTED_NUMBER_FORMAT', 'unsupported', formatProperty, `Date format "${spec}" cannot be represented in Excel: ${date.reason}.`, {
-            details: { format: source },
-          }),
+          createDiagnostic(
+            'UNSUPPORTED_NUMBER_FORMAT',
+            'unsupported',
+            formatProperty,
+            `Date format "${spec}" cannot be represented in Excel: ${date.reason}.`,
+            {
+              details: { format: source },
+            },
+          ),
         );
       }
       code = escapeAffix(prefix) + date.code + escapeAffix(suffix);
@@ -312,9 +390,15 @@ export function translateFormatString(format: unknown, formatter: unknown, ctx: 
       if (!m) {
         return unsupported(
           `Format specifier "${spec}" has no Excel equivalent`,
-          createDiagnostic('UNSUPPORTED_NUMBER_FORMAT', 'unsupported', formatProperty, `Format specifier "${spec}" cannot be represented in Excel.`, {
-            details: { format: source },
-          }),
+          createDiagnostic(
+            'UNSUPPORTED_NUMBER_FORMAT',
+            'unsupported',
+            formatProperty,
+            `Format specifier "${spec}" cannot be represented in Excel.`,
+            {
+              details: { format: source },
+            },
+          ),
         );
       }
       const thousands = m[1] === ',';
@@ -326,9 +410,15 @@ export function translateFormatString(format: unknown, formatter: unknown, ctx: 
       // cannot carry the literal text.
       if (prefix.trim() || suffix.trim()) {
         diagnostics.push(
-          createDiagnostic('APPROXIMATED_NUMBER_FORMAT', 'approximated', formatProperty, `Literal text around ${ctx.axisType} axis labels is not reproduced.`, {
-            details: { format: source },
-          }),
+          createDiagnostic(
+            'APPROXIMATED_NUMBER_FORMAT',
+            'approximated',
+            formatProperty,
+            `Literal text around ${ctx.axisType} axis labels is not reproduced.`,
+            {
+              details: { format: source },
+            },
+          ),
         );
       }
       return { format: null, ...flags, diagnostics };
@@ -337,13 +427,14 @@ export function translateFormatString(format: unknown, formatter: unknown, ctx: 
       separatorDiagnostics(true, ctxDecimals);
     } else if (prefix || suffix) {
       // e.g. "{value}%" → General"%" (the value is not a fraction, so "%" stays a literal; General keeps decimals).
-      code = escapeAffix(prefix) + 'General' + escapeAffix(suffix);
+      code = `${escapeAffix(prefix)}General${escapeAffix(suffix)}`;
     } else {
       code = 'General';
     }
   }
 
-  if (isDataLabel) reportDroppedLiterals(segments, diagnostics, formatProperty, source, numeric.index, literalPrefix, literalSuffix);
+  if (isDataLabel)
+    reportDroppedLiterals(segments, diagnostics, formatProperty, source, numeric.index, literalPrefix, literalSuffix);
   return { format: { kind: 'excel', code, source }, ...flags, diagnostics };
 }
 
@@ -367,9 +458,15 @@ function reportDroppedLiterals(
   });
   if (!SEPARATOR_ONLY.test(dropped)) {
     diagnostics.push(
-      createDiagnostic('APPROXIMATED_DATA_LABELS', 'approximated', property, 'Literal text between label parts is replaced by Excel\'s label separator.', {
-        details: { format: source, droppedText: dropped.trim() },
-      }),
+      createDiagnostic(
+        'APPROXIMATED_DATA_LABELS',
+        'approximated',
+        property,
+        "Literal text between label parts is replaced by Excel's label separator.",
+        {
+          details: { format: source, droppedText: dropped.trim() },
+        },
+      ),
     );
   }
 }

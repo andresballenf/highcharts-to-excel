@@ -88,7 +88,10 @@ export interface ExportOptions {
   /** Receives each diagnostic as it is raised. */
   onWarning?: (diagnostic: Diagnostic) => void;
   themeOverrides?: ThemeOverrides;
-  /** Override the exported chart size in CSS pixels. Defaults to the rendered chart size. */
+  /**
+   * Override the exported chart size in CSS pixels (finite, 50 to 20000). Defaults to the rendered
+   * chart size.
+   */
   chartWidth?: number;
   chartHeight?: number;
   /**
@@ -117,9 +120,12 @@ export interface ExportOptions {
 }
 
 export interface ExportTimings {
+  /** Extraction, `hooks.transformModel` and theme overrides (the reference image is excluded). */
   extractMs: number;
   translateMs: number;
   writeMs: number;
+  /** Rendering the optional reference image (`includeReferenceImage`); 0 when none was rendered. */
+  imageMs?: number;
   totalMs: number;
 }
 
@@ -137,8 +143,12 @@ export interface ExportResult {
 
 export interface MultiChartExportEntry {
   chart: unknown;
-  /** Per-chart overrides; sheet names must be unique across the workbook. */
-  options?: Omit<ExportOptions, 'filename' | 'properties'>;
+  /**
+   * Per-chart overrides; sheet names must be unique across the workbook. An entry's `strictMode`
+   * overrides the workbook-wide one. `writer` and `includeModel` are workbook-level concerns and
+   * are not accepted here (pass the writer in `exportChartsToWorkbook`'s second argument).
+   */
+  options?: Omit<ExportOptions, 'filename' | 'properties' | 'writer' | 'includeModel'>;
 }
 
 export interface MultiChartExportResult {
@@ -190,15 +200,26 @@ export type ExportErrorCode =
   | 'WRITER_FAILURE'
   | 'INVALID_OPTIONS';
 
+export interface ExportErrorDetails {
+  chartId?: string | null;
+  /** The option or chart property at fault (INVALID_OPTIONS names the option here). */
+  property?: string;
+  diagnostics?: Diagnostic[];
+}
+
+/**
+ * Error thrown (or rejected) by the export API. The underlying error, when there is one, is the
+ * standard `error.cause` (for example the writer's error for WRITER_FAILURE).
+ */
 export class ExportError extends Error {
   override readonly name = 'HighchartsExcelExportError';
   constructor(
     readonly code: ExportErrorCode,
     message: string,
-    readonly details: { chartId?: string | null; property?: string; diagnostics?: Diagnostic[]; cause?: unknown } = {},
+    readonly details: ExportErrorDetails = {},
+    options?: { cause?: unknown },
   ) {
-    super(message);
-    if (details.cause !== undefined) (this as { cause?: unknown }).cause = details.cause;
+    super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
   }
 }
 
@@ -207,7 +228,85 @@ export const XLSX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.spr
 export const DEFAULT_MENU_TEXT = 'Download editable Excel chart';
 export const DEFAULT_MENU_ITEM_KEY = 'downloadEditableXLSX';
 
-export function resolveExportOptions(options: ExportOptions = {}): Required<
+const FIDELITY_MODES: readonly FidelityMode[] = ['best-effort', 'minimal'];
+const DATA_MODES: readonly DataMode[] = ['rendered', 'raw'];
+const VISIBILITY_MODES: readonly SeriesVisibilityMode[] = ['visible', 'all'];
+/** Bounds for `chartWidth` / `chartHeight`, in CSS pixels. */
+export const MIN_CHART_SIZE_PX = 50;
+export const MAX_CHART_SIZE_PX = 20_000;
+
+function invalid(property: string, expected: string, value: unknown): ExportError {
+  const shown =
+    typeof value === 'string' ? JSON.stringify(value) : typeof value === 'number' ? String(value) : typeof value;
+  return new ExportError(
+    'INVALID_OPTIONS',
+    `Invalid export option "${property}": expected ${expected}, got ${shown}.`,
+    { property },
+  );
+}
+
+function checkLiteral(options: Record<string, unknown>, property: string, allowed: readonly string[]): void {
+  const v = options[property];
+  if (v !== undefined && !allowed.includes(v as string))
+    throw invalid(property, allowed.map((a) => `'${a}'`).join(' or '), v);
+}
+
+function checkString(options: Record<string, unknown>, property: string): void {
+  const v = options[property];
+  if (v !== undefined && typeof v !== 'string') throw invalid(property, 'a string', v);
+}
+
+function checkFunction(value: unknown, property: string): void {
+  if (value !== undefined && typeof value !== 'function') throw invalid(property, 'a function', value);
+}
+
+function checkSize(options: Record<string, unknown>, property: string): void {
+  const v = options[property];
+  if (v === undefined) return;
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < MIN_CHART_SIZE_PX || v > MAX_CHART_SIZE_PX) {
+    throw invalid(property, `a finite number of CSS pixels from ${MIN_CHART_SIZE_PX} to ${MAX_CHART_SIZE_PX}`, v);
+  }
+}
+
+/**
+ * Validates the options a JavaScript caller can get wrong without a type checker.
+ *
+ * @throws ExportError INVALID_OPTIONS naming the option (also in `details.property`).
+ */
+function validateExportOptions(options: unknown): asserts options is ExportOptions {
+  if (typeof options !== 'object' || options === null || Array.isArray(options)) {
+    throw new ExportError('INVALID_OPTIONS', 'Export options must be an object.', { property: 'options' });
+  }
+  const o = options as Record<string, unknown>;
+  checkLiteral(o, 'fidelity', FIDELITY_MODES);
+  checkLiteral(o, 'dataMode', DATA_MODES);
+  checkLiteral(o, 'seriesVisibility', VISIBILITY_MODES);
+  checkSize(o, 'chartWidth');
+  checkSize(o, 'chartHeight');
+  checkString(o, 'chartSheetName');
+  checkString(o, 'dataSheetName');
+  checkString(o, 'filename');
+  checkFunction(o.onWarning, 'onWarning');
+  if (o.hooks !== undefined) {
+    if (typeof o.hooks !== 'object' || o.hooks === null) throw invalid('hooks', 'an object', o.hooks);
+    checkFunction((o.hooks as Record<string, unknown>).transformModel, 'hooks.transformModel');
+  }
+  if (o.writer !== undefined) {
+    const w = o.writer as { write?: unknown } | null;
+    if (typeof w !== 'object' || w === null || typeof w.write !== 'function') {
+      throw invalid('writer', 'an object with a write(spec) function', o.writer);
+    }
+  }
+}
+
+/**
+ * Fills defaults after validating the options.
+ *
+ * @throws ExportError INVALID_OPTIONS when an option has the wrong type or value.
+ */
+export function resolveExportOptions(
+  options: ExportOptions = {},
+): Required<
   Pick<
     ExportOptions,
     | 'chartSheetName'
@@ -222,6 +321,7 @@ export function resolveExportOptions(options: ExportOptions = {}): Required<
   >
 > &
   ExportOptions {
+  validateExportOptions(options);
   return {
     ...options,
     chartSheetName: options.chartSheetName ?? 'Chart',

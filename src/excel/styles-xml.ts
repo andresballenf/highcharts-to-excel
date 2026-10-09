@@ -2,6 +2,7 @@
  * xl/styles.xml builder. Collects distinct CellStyleSpecs and assigns cellXfs indices.
  */
 import type { CellStyleSpec } from './writer-interface';
+import { assertExcelFormatCode } from '../utils/format-code';
 import { el, escapeAttr, xmlDocument } from './xml';
 
 const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
@@ -41,20 +42,26 @@ function normalizeHex(hex: string | undefined, what: string): string | null {
   return h.toUpperCase();
 }
 
+const ALIGNMENTS: ReadonlySet<string> = new Set(['left', 'center', 'right']);
+
 function normalize(style: CellStyleSpec): NormalizedStyle {
   const nf = style.numberFormat;
+  const align = style.align;
   return {
     bold: style.bold === true,
     italic: style.italic === true,
-    numberFormat: nf && nf !== 'General' ? nf : null,
+    numberFormat: nf && nf !== 'General' ? assertExcelFormatCode(nf, 'a cell style') : null,
     fillHex: normalizeHex(style.fillHex, 'fill'),
     fontColorHex: normalizeHex(style.fontColorHex, 'font'),
-    align: style.align ?? null,
+    // Whitelisted: anything else is ignored rather than written into an attribute.
+    align: typeof align === 'string' && ALIGNMENTS.has(align) ? (align as NormalizedStyle['align']) : null,
   };
 }
 
 function isDefault(s: NormalizedStyle): boolean {
-  return !s.bold && !s.italic && s.numberFormat === null && s.fillHex === null && s.fontColorHex === null && s.align === null;
+  return (
+    !s.bold && !s.italic && s.numberFormat === null && s.fillHex === null && s.fontColorHex === null && s.align === null
+  );
 }
 
 function keyOf(s: NormalizedStyle): string {
@@ -118,15 +125,25 @@ export function buildStyles(styles: Iterable<CellStyleSpec | undefined>): Styles
     let id = fillIdByHex.get(hex);
     if (id === undefined) {
       id = fills.length;
-      fills.push(`<fill><patternFill patternType="solid"><fgColor rgb="FF${hex}"/><bgColor indexed="64"/></patternFill></fill>`);
+      fills.push(
+        `<fill><patternFill patternType="solid"><fgColor rgb="FF${hex}"/><bgColor indexed="64"/></patternFill></fill>`,
+      );
       fillIdByHex.set(hex, id);
     }
     return id;
   };
 
+  // Index per style object, recorded at registration so indexOf does not normalise again.
+  const xfIndexByObject = new WeakMap<CellStyleSpec, number>();
   const register = (style: CellStyleSpec | undefined): number => {
     if (!style) return 0;
-    const n = normalize(style);
+    const known = xfIndexByObject.get(style);
+    if (known !== undefined) return known;
+    const idx = registerNormalized(normalize(style));
+    xfIndexByObject.set(style, idx);
+    return idx;
+  };
+  const registerNormalized = (n: NormalizedStyle): number => {
     if (isDefault(n)) return 0;
     const k = keyOf(n);
     const existing = xfIndexByKey.get(k);
@@ -183,6 +200,8 @@ export function buildStyles(styles: Iterable<CellStyleSpec | undefined>): Styles
     xml,
     indexOf(style) {
       if (!style) return 0;
+      const known = xfIndexByObject.get(style);
+      if (known !== undefined) return known;
       const n = normalize(style);
       if (isDefault(n)) return 0;
       const idx = xfIndexByKey.get(keyOf(n));

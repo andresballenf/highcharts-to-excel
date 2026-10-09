@@ -1,6 +1,6 @@
 /**
  * Integration suite: the 20 required export cases, run against a real Highcharts build (one
- * version per test file — see export-fixtures.v12/v13.test.ts). Every case renders a live chart in
+ * version per test file — see export-fixtures.v11/v12/v13.test.ts). Every case renders a live chart in
  * jsdom, exports it with `exportHighchartsToXlsx`, saves the workbook under
  * `tests/output/export/<version>/<case>.xlsx` and inspects the package structurally:
  * package parts, content types, chart XML groups/axes/formatting, and that every series formula
@@ -17,7 +17,8 @@ import * as F from '../fixtures/highcharts-options';
 import { decodeXmlEntities, inspectXlsx, type XlsxInspection } from '../helpers/inspect-xlsx';
 import { destroyAll, renderChart, type HighchartsLike } from '../helpers/render-chart';
 
-type AnyChart = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: tests read live Highcharts internals that the public types omit
+type AnyChart = any;
 
 // ---------------------------------------------------------------------------
 // Helpers (exported for the other integration files)
@@ -105,7 +106,10 @@ export function hexOf(css: unknown): string | null {
 /** Axis element names (catAx/valAx/dateAx/serAx) directly in the plot area, in order. */
 export function axisElements(chartXml: string): Array<{ kind: string; xml: string }> {
   const plot = /<c:plotArea>([\s\S]*)<\/c:plotArea>/.exec(chartXml)?.[1] ?? '';
-  return [...plot.matchAll(/<c:(catAx|valAx|dateAx|serAx)>([\s\S]*?)<\/c:\1>/g)].map((m) => ({ kind: m[1]!, xml: m[2]! }));
+  return [...plot.matchAll(/<c:(catAx|valAx|dateAx|serAx)>([\s\S]*?)<\/c:\1>/g)].map((m) => ({
+    kind: m[1]!,
+    xml: m[2]!,
+  }));
 }
 
 /** Expected numeric y values per exported series, derived from the fixture options. */
@@ -123,10 +127,7 @@ function seriesData(o: Options, i: number): unknown[] {
 }
 
 /** Assertions shared by every successful export. */
-export async function assertCommonPackage(
-  result: ExportResult,
-  expectedExcelType: string,
-): Promise<XlsxInspection> {
+export async function assertCommonPackage(result: ExportResult, expectedExcelType: string): Promise<XlsxInspection> {
   expect(result.bytes[0]).toBe(0x50);
   expect(result.bytes[1]).toBe(0x4b);
   const x = await inspectXlsx(result.bytes);
@@ -145,7 +146,9 @@ export async function assertCommonPackage(
     expect(x.parts, `missing part ${part}`).toContain(part);
   }
   const ct = x.text('[Content_Types].xml');
-  expect(ct).toMatch(/<Override[^>]*PartName="\/xl\/charts\/chart1\.xml"[^>]*ContentType="application\/vnd\.openxmlformats-officedocument\.drawingml\.chart\+xml"/);
+  expect(ct).toMatch(
+    /<Override[^>]*PartName="\/xl\/charts\/chart1\.xml"[^>]*ContentType="application\/vnd\.openxmlformats-officedocument\.drawingml\.chart\+xml"/,
+  );
   expect(x.contentTypes()).toContain('application/vnd.openxmlformats-officedocument.drawingml.chart+xml');
   // Relationship chain: chart sheet → drawing → chart.
   expect(x.text('xl/worksheets/_rels/sheet1.xml.rels')).toMatch(/Target="[^"]*drawings\/drawing1\.xml"/);
@@ -271,7 +274,9 @@ export const EXPORT_CASES: ExportCase[] = [
       expect(chartXml).toContain('<c:varyColors val="1"/>');
       const pts = dPtColors(serBlocks(chartXml)[0]!);
       const live = (chart.series[0].points as Array<{ color: unknown }>).map((p) => hexOf(p.color));
-      live.forEach((hex, i) => expect(pts.get(i), `pie dPt ${i}`).toBe(hex));
+      live.forEach((hex, i) => {
+        expect(pts.get(i), `pie dPt ${i}`).toBe(hex);
+      });
       expect(pts.get(1)).toBe('FF0000'); // explicit point color in the fixture
       expect(chartXml).toMatch(/<c:dPt><c:idx val="0"\/>(?:(?!<\/c:dPt>)[\s\S])*<c:explosion val="\d+"\/>/); // sliced
     },
@@ -300,7 +305,10 @@ export const EXPORT_CASES: ExportCase[] = [
       expect(valuesAtRange(x, fs[1]!.yVal!)).toEqual(male.map((p) => p[1]));
       expect(fs.every((f) => f.val === undefined && f.cat === undefined)).toBe(true);
       // Scatter blocks have "<name> X/Y" headers, so the series name is a literal.
-      expect(serBlocks(x.chartXml(0)).map((s) => /<c:tx><c:v>([^<]*)<\/c:v><\/c:tx>/.exec(s)?.[1])).toEqual(['Female', 'Male']);
+      expect(serBlocks(x.chartXml(0)).map((s) => /<c:tx><c:v>([^<]*)<\/c:v><\/c:tx>/.exec(s)?.[1])).toEqual([
+        'Female',
+        'Male',
+      ]);
     },
   },
   {
@@ -322,9 +330,14 @@ export const EXPORT_CASES: ExportCase[] = [
       const a2 = x.cellXml(x.sheetPath('Data'), 'A2')!;
       const styleIdx = Number(/\bs="(\d+)"/.exec(a2)?.[1]);
       const styles = x.text('xl/styles.xml');
-      const cellXfs = [.../<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/.exec(styles)![1]!.matchAll(/<xf\s[^>]*?\/?>/g)].map((m) => m[0]);
+      const cellXfs = [.../<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/.exec(styles)![1]!.matchAll(/<xf\s[^>]*?\/?>/g)].map(
+        (m) => m[0],
+      );
       const numFmtId = Number(/numFmtId="(\d+)"/.exec(cellXfs[styleIdx]!)?.[1]);
-      const code = numFmtId >= 164 ? decodeXmlEntities(new RegExp(`<numFmt numFmtId="${numFmtId}" formatCode="([^"]*)"`).exec(styles)?.[1] ?? '') : String(numFmtId);
+      const code =
+        numFmtId >= 164
+          ? decodeXmlEntities(new RegExp(`<numFmt numFmtId="${numFmtId}" formatCode="([^"]*)"`).exec(styles)?.[1] ?? '')
+          : String(numFmtId);
       expect(code, 'date cell format').toMatch(/^(?:1[4-9]|2[0-2]|.*[dmy].*)$/);
     },
   },
@@ -335,7 +348,10 @@ export const EXPORT_CASES: ExportCase[] = [
     groups: ['barChart'],
     check: ({ chartXml }) => {
       const fmts = [...chartXml.matchAll(/<c:numFmt formatCode="([^"]*)"/g)].map((m) => decodeXmlEntities(m[1]!));
-      expect(fmts.some((f) => f.includes('%')), `numFmts: ${fmts.join(' | ')}`).toBe(true);
+      expect(
+        fmts.some((f) => f.includes('%')),
+        `numFmts: ${fmts.join(' | ')}`,
+      ).toBe(true);
       const valAx = axisElements(chartXml).find((a) => a.kind === 'valAx')!;
       expect(valAx.xml).toMatch(/<c:numFmt formatCode="[^"]*%[^"]*" sourceLinked="0"\/>/);
     },
@@ -480,8 +496,12 @@ export const EXPORT_CASES: ExportCase[] = [
       expect(right[0]!.xml).toContain('<a:t>Temperature</a:t>');
       expect(axes.filter((a) => a.kind === 'valAx' && a.xml.includes('<a:t>Rainfall</a:t>'))).toHaveLength(1);
       // Each group references its own axis pair.
-      const barIds = [.../<c:barChart>[\s\S]*?<\/c:barChart>/.exec(chartXml)![0].matchAll(/<c:axId val="(\d+)"\/>/g)].map((m) => m[1]);
-      const lineIds = [.../<c:lineChart>[\s\S]*?<\/c:lineChart>/.exec(chartXml)![0].matchAll(/<c:axId val="(\d+)"\/>/g)].map((m) => m[1]);
+      const barIds = [
+        .../<c:barChart>[\s\S]*?<\/c:barChart>/.exec(chartXml)![0].matchAll(/<c:axId val="(\d+)"\/>/g),
+      ].map((m) => m[1]);
+      const lineIds = [
+        .../<c:lineChart>[\s\S]*?<\/c:lineChart>/.exec(chartXml)![0].matchAll(/<c:axId val="(\d+)"\/>/g),
+      ].map((m) => m[1]);
       expect(barIds).toHaveLength(2);
       expect(lineIds).toHaveLength(2);
       expect(new Set([...barIds, ...lineIds]).size).toBe(4);
@@ -494,54 +514,59 @@ export const EXPORT_CASES: ExportCase[] = [
 // Suite
 // ---------------------------------------------------------------------------
 
-export function runExportFixtureSuite(Highcharts: HighchartsLike, version: 'v12' | 'v13'): void {
+export function runExportFixtureSuite(Highcharts: HighchartsLike, version: 'v11' | 'v12' | 'v13'): void {
   const outDir = resolve(__dirname, '../output/export', version);
   const render = (o: Options): Chart => renderChart(Highcharts, o);
 
   describe(`export fixtures (Highcharts ${Highcharts.version ?? version})`, () => {
     afterEach(() => destroyAll());
 
-    it.each(EXPORT_CASES.map((c, i) => [`${String(i + 1).padStart(2, '0')} ${c.name}`, c] as const))('%s', async (_label, c) => {
-      const chart = render(c.fixture) as AnyChart;
-      c.before?.(chart);
-      const result = await exportHighchartsToXlsx(chart, c.exportOptions);
-      save(outDir, c.name, result.bytes);
-      const x = await assertCommonPackage(result, c.excelType);
-      const chartXml = x.chartXml(0);
-      expect(x.plotGroupKinds(x.chartPaths()[0]!)).toEqual(c.groups);
-      expect(x.sheetNames()).toEqual([
-        { name: 'Chart', hidden: false },
-        { name: 'Data', hidden: false },
-      ]);
+    it.each(EXPORT_CASES.map((c, i) => [`${String(i + 1).padStart(2, '0')} ${c.name}`, c] as const))(
+      '%s',
+      async (_label, c) => {
+        const chart = render(c.fixture) as AnyChart;
+        c.before?.(chart);
+        const result = await exportHighchartsToXlsx(chart, c.exportOptions);
+        save(outDir, c.name, result.bytes);
+        const x = await assertCommonPackage(result, c.excelType);
+        const chartXml = x.chartXml(0);
+        expect(x.plotGroupKinds(x.chartPaths()[0]!)).toEqual(c.groups);
+        expect(x.sheetNames()).toEqual([
+          { name: 'Chart', hidden: false },
+          { name: 'Data', hidden: false },
+        ]);
 
-      if (c.categories !== false) {
-        // Values + categories straight from the fixture: every visible series in order.
-        const fs = x.seriesFormulas(x.chartPaths()[0]!);
-        const series = (c.fixture.series ?? []) as Array<{ data?: unknown[]; name?: string; visible?: boolean }>;
-        expect(fs).toHaveLength(series.length);
-        const fixtureCats = (Array.isArray(c.fixture.xAxis) ? c.fixture.xAxis[0] : c.fixture.xAxis)?.categories;
-        series.forEach((s, i) => {
-          const f = fs[i]!;
-          expect(f.val, `series ${i} c:val`).toBeDefined();
-          expect(valuesAtRange(x, f.val!)).toEqual(yValues(s.data ?? []));
-          expect(f.cat, `series ${i} c:cat`).toBeDefined();
-          const cats = valuesAtRange(x, f.cat!);
-          if (fixtureCats) expect(cats).toEqual(fixtureCats.slice(0, cats.length));
-          else expect(cats).toEqual((chart.series[i].points as Array<{ name: string }>).map((p) => p.name));
-          if (f.name) expect(valuesAtRange(x, f.name)).toEqual([s.name]);
-        });
-      }
+        if (c.categories !== false) {
+          // Values + categories straight from the fixture: every visible series in order.
+          const fs = x.seriesFormulas(x.chartPaths()[0]!);
+          const series = (c.fixture.series ?? []) as Array<{ data?: unknown[]; name?: string; visible?: boolean }>;
+          expect(fs).toHaveLength(series.length);
+          const fixtureCats = (Array.isArray(c.fixture.xAxis) ? c.fixture.xAxis[0] : c.fixture.xAxis)?.categories;
+          series.forEach((s, i) => {
+            const f = fs[i]!;
+            expect(f.val, `series ${i} c:val`).toBeDefined();
+            expect(valuesAtRange(x, f.val!)).toEqual(yValues(s.data ?? []));
+            expect(f.cat, `series ${i} c:cat`).toBeDefined();
+            const cats = valuesAtRange(x, f.cat!);
+            if (fixtureCats) expect(cats).toEqual(fixtureCats.slice(0, cats.length));
+            else expect(cats).toEqual((chart.series[i].points as Array<{ name: string }>).map((p) => p.name));
+            if (f.name) expect(valuesAtRange(x, f.name)).toEqual([s.name]);
+          });
+        }
 
-      // Series colors follow the live chart (pie/doughnut use per-point colors instead).
-      if (!['pie', 'doughnut', 'styled-mode'].includes(c.name)) {
-        const sers = serBlocks(chartXml);
-        const visible = (chart.series as AnyChart[]).filter((s) => s.visible !== false);
-        expect(sers).toHaveLength(visible.length);
-        visible.forEach((s, i) => expect(seriesColor(sers[i]!), `series ${i} color`).toBe(hexOf(s.color)));
-      }
+        // Series colors follow the live chart (pie/doughnut use per-point colors instead).
+        if (!['pie', 'doughnut', 'styled-mode'].includes(c.name)) {
+          const sers = serBlocks(chartXml);
+          const visible = (chart.series as AnyChart[]).filter((s) => s.visible !== false);
+          expect(sers).toHaveLength(visible.length);
+          visible.forEach((s, i) => {
+            expect(seriesColor(sers[i]!), `series ${i} color`).toBe(hexOf(s.color));
+          });
+        }
 
-      c.check?.({ x, chartXml, result, chart, options: c.fixture });
-    });
+        c.check?.({ x, chartXml, result, chart, options: c.fixture });
+      },
+    );
 
     it('18b hidden-series with seriesVisibility:"all" exports both series', async () => {
       const chart = render(F.hiddenSeries);

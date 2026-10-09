@@ -1,6 +1,6 @@
 // Angular: a plain ViewChild + Highcharts.chart (no wrapper package needed). With highcharts-angular,
 // capture the chart from its callbackFunction input instead and pass it to downloadHighchartsAsXlsx.
-import { Component, ElementRef, ViewChild, type AfterViewInit, type OnDestroy } from '@angular/core';
+import { Component, type ElementRef, ViewChild, type AfterViewInit, type OnDestroy } from '@angular/core';
 import Highcharts from 'highcharts';
 import 'highcharts/modules/exporting';
 import { downloadHighchartsAsXlsx, installHighchartsExcelExport } from 'highcharts-editable-excel';

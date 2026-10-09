@@ -54,7 +54,15 @@ const sales = Highcharts.chart('sales', {
 const traffic = Highcharts.chart('traffic', {
   title: { text: 'Traffic' },
   xAxis: { type: 'datetime' },
-  series: [{ type: 'area', name: 'Visits', pointStart: Date.UTC(2026, 0, 1), pointInterval: 86_400_000, data: [5, 7, 3, 9, 4] }],
+  series: [
+    {
+      type: 'area',
+      name: 'Visits',
+      pointStart: Date.UTC(2026, 0, 1),
+      pointInterval: 86_400_000,
+      data: [5, 7, 3, 9, 4],
+    },
+  ],
   exporting: { editableExcel: { enabled: false } }, // no menu item on this chart
 });
 
@@ -129,7 +137,11 @@ async function exportStrict(): Promise<void> {
     await downloadHighchartsAsXlsx(sales, { ...brandOptions, strictMode: true });
   } catch (error) {
     if (error instanceof ExportError) {
-      console.error(error.code, error.message, error.details.diagnostics?.map((d) => d.code));
+      console.error(
+        error.code,
+        error.message,
+        error.details.diagnostics?.map((d) => d.code),
+      );
     } else {
       throw error;
     }
@@ -169,15 +181,19 @@ async function writeCustomWorkbook(): Promise<Uint8Array> {
 }
 
 // --- README "Programmatic usage" block, verbatim ----------------------------------------------------------
-async function programmaticUsage(chart: Highcharts.Chart, salesChart: Highcharts.Chart, trafficChart: Highcharts.Chart): Promise<void> {
+async function programmaticUsage(
+  chart: Highcharts.Chart,
+  salesChart: Highcharts.Chart,
+  trafficChart: Highcharts.Chart,
+): Promise<void> {
   // 1. Bytes only: nothing is downloaded.
   const result = await exportHighchartsToXlsx(chart, { filename: 'sales.xlsx' });
-  result.bytes;      // Uint8Array (the .xlsx package)
-  result.filename;   // "sales.xlsx"
-  result.mimeType;   // "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  result.warnings;   // Diagnostic[]: everything that was approximated or dropped
-  result.report;     // CompatibilityReport (editable, excelChartType, supported/approximated/...)
-  result.timings;    // { extractMs, translateMs, writeMs, totalMs }
+  result.bytes; // Uint8Array (the .xlsx package)
+  result.filename; // "sales.xlsx"
+  result.mimeType; // "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  result.warnings; // Diagnostic[]: everything that was approximated or dropped
+  result.report; // CompatibilityReport (editable, excelChartType, supported/approximated/...)
+  result.timings; // { extractMs, translateMs, writeMs, totalMs }
   triggerDownload(result.bytes, result.filename); // or upload the bytes somewhere
 
   // 2. Export and download in one step (browser only).
@@ -196,7 +212,9 @@ async function programmaticUsage(chart: Highcharts.Chart, salesChart: Highcharts
   });
 
   // 5. Several charts in one workbook (one chart sheet + one data sheet per chart).
-  const multi = await exportChartsToWorkbook([{ chart: salesChart }, { chart: trafficChart }], { filename: 'dashboard' });
+  const multi = await exportChartsToWorkbook([{ chart: salesChart }, { chart: trafficChart }], {
+    filename: 'dashboard',
+  });
   console.log(bytes.byteLength, multi.charts.length);
 }
 
@@ -211,7 +229,10 @@ async function typescriptSnippet(): Promise<ExportResult> {
 const loggingWriter: ExcelWriter = {
   name: 'logging-default',
   async write(workbook) {
-    console.log('writing sheets', workbook.sheets.map((s) => s.name));
+    console.log(
+      'writing sheets',
+      workbook.sheets.map((s) => s.name),
+    );
     return createDefaultExcelWriter().write(workbook);
   },
 };
@@ -238,4 +259,17 @@ async function manualPipeline(chart: Highcharts.Chart): Promise<Uint8Array> {
   return loggingWriter.write({ properties: { title: 'Manual' }, sheets: translation.sheets });
 }
 
-export { exportWithCustomWriter, manualPipeline, programmaticUsage, typescriptSnippet, exportSales, downloadSales, checkTraffic, exportFromOptions, exportDashboard, exportStrict, installWithCallbacks, writeCustomWorkbook };
+export {
+  exportWithCustomWriter,
+  manualPipeline,
+  programmaticUsage,
+  typescriptSnippet,
+  exportSales,
+  downloadSales,
+  checkTraffic,
+  exportFromOptions,
+  exportDashboard,
+  exportStrict,
+  installWithCallbacks,
+  writeCustomWorkbook,
+};

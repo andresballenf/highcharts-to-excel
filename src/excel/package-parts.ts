@@ -120,7 +120,8 @@ export function buildWorkbookRelsXml(sheetCount: number): { xml: string; sheetRe
 // Theme (Office 2013+ default colours and fonts)
 // ---------------------------------------------------------------------------
 
-const srgb = (hex: string, mods = ''): string => `<a:srgbClr val="${hex}">${mods}</a:srgbClr>`.replace('></a:srgbClr>', '/>');
+const srgb = (hex: string, mods = ''): string =>
+  `<a:srgbClr val="${hex}">${mods}</a:srgbClr>`.replace('></a:srgbClr>', '/>');
 const ph = (mods: string): string => `<a:schemeClr val="phClr">${mods}</a:schemeClr>`;
 
 const CLR_SCHEME =

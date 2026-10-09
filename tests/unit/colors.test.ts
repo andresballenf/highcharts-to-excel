@@ -11,7 +11,16 @@ import {
 } from '../../src/utils/colors';
 import { fillToSolidColor, resolveSeriesColor, toFill } from '../../src/translators/color-translator';
 import { isFormulaLike, stripControlChars, truncate } from '../../src/utils/text';
-import { clamp, emuToPx, ptToPx, pxToEmu, pxToHundredthsPt, pxToLineWidthEmu, pxToPt, roundTo } from '../../src/utils/units';
+import {
+  clamp,
+  emuToPx,
+  ptToPx,
+  pxToEmu,
+  pxToHundredthsPt,
+  pxToLineWidthEmu,
+  pxToPt,
+  roundTo,
+} from '../../src/utils/units';
 
 const rgba = (input: string) => {
   const c = parseColor(input);
@@ -71,7 +80,9 @@ describe('parseColor', () => {
     // resolver overrides built-in defaults
     expect(colorToHex(parseColor('var(--highcharts-color-0)', () => 'black')!)).toBe('000000');
     // light-dark() as emitted by Highcharts 13 CSS uses the light value
-    expect(colorToHex(parseColor('var(--highcharts-background-color)', () => 'light-dark(#ffffff, #141414)')!)).toBe('FFFFFF');
+    expect(colorToHex(parseColor('var(--highcharts-background-color)', () => 'light-dark(#ffffff, #141414)')!)).toBe(
+      'FFFFFF',
+    );
   });
 
   it('stops recursion at depth 4', () => {
@@ -117,11 +128,21 @@ describe('toFill', () => {
     expect(toFill('none')).toEqual({ fill: null });
     const bad = toFill('bogus', undefined, 'series[0].color');
     expect(bad.fill).toBeNull();
-    expect(bad.diagnostic).toMatchObject({ code: 'UNRESOLVED_COLOR', outcome: 'approximated', property: 'series[0].color' });
+    expect(bad.diagnostic).toMatchObject({
+      code: 'UNRESOLVED_COLOR',
+      outcome: 'approximated',
+      property: 'series[0].color',
+    });
   });
 
   it('converts linear gradients with an angle', () => {
-    const r = toFill({ linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 }, stops: [[1, '#000000'], [0, '#ffffff']] });
+    const r = toFill({
+      linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+      stops: [
+        [1, '#000000'],
+        [0, '#ffffff'],
+      ],
+    });
     expect(r.diagnostic).toBeUndefined();
     expect(r.fill).toMatchObject({
       type: 'gradient',
@@ -131,21 +152,63 @@ describe('toFill', () => {
         { offset: 1, color: { r: 0, g: 0, b: 0 } },
       ],
     });
-    expect(toFill({ linearGradient: [0, 0, 1, 0], stops: [[0, 'red'], [1, 'blue']] }).fill).toMatchObject({ angle: 0 });
-    expect(toFill({ linearGradient: [0, 0, 1, 1], stops: [[0, 'red'], [1, 'blue']] }).fill).toMatchObject({ angle: 45 });
+    expect(
+      toFill({
+        linearGradient: [0, 0, 1, 0],
+        stops: [
+          [0, 'red'],
+          [1, 'blue'],
+        ],
+      }).fill,
+    ).toMatchObject({ angle: 0 });
+    expect(
+      toFill({
+        linearGradient: [0, 0, 1, 1],
+        stops: [
+          [0, 'red'],
+          [1, 'blue'],
+        ],
+      }).fill,
+    ).toMatchObject({ angle: 45 });
     expect(toFill({ linearGradient: [1, 0, 0, 0], stops: [[0, 'red']] }).fill).toMatchObject({ angle: 180 });
   });
 
   it('approximates radial gradients', () => {
-    const r = toFill({ radialGradient: { cx: 0.5, cy: 0.5, r: 0.5 }, stops: [[0, 'red'], [1, 'var(--highcharts-color-0)']] }, undefined, 'series[1].color');
+    const r = toFill(
+      {
+        radialGradient: { cx: 0.5, cy: 0.5, r: 0.5 },
+        stops: [
+          [0, 'red'],
+          [1, 'var(--highcharts-color-0)'],
+        ],
+      },
+      undefined,
+      'series[1].color',
+    );
     expect(r.fill).toMatchObject({ type: 'gradient', angle: 90 });
-    expect(r.diagnostic).toMatchObject({ code: 'UNSUPPORTED_GRADIENT', outcome: 'approximated', property: 'series[1].color.radialGradient' });
+    expect(r.diagnostic).toMatchObject({
+      code: 'UNSUPPORTED_GRADIENT',
+      outcome: 'approximated',
+      property: 'series[1].color.radialGradient',
+    });
   });
 
   it('fillToSolidColor', () => {
     expect(fillToSolidColor(null)).toBeNull();
     expect(fillToSolidColor({ type: 'none' })).toBeNull();
-    expect(colorToHex(fillToSolidColor(toFill({ linearGradient: [0, 0, 0, 1], stops: [[0, '#abcdef'], [1, '#000']] }).fill)!)).toBe('ABCDEF');
+    expect(
+      colorToHex(
+        fillToSolidColor(
+          toFill({
+            linearGradient: [0, 0, 0, 1],
+            stops: [
+              [0, '#abcdef'],
+              [1, '#000'],
+            ],
+          }).fill,
+        )!,
+      ),
+    ).toBe('ABCDEF');
   });
 
   it('resolveSeriesColor prefers explicit color, then palette', () => {

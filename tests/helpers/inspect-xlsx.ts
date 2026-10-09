@@ -18,7 +18,7 @@ export interface XlsxInspection {
   has(path: string): boolean;
   bytes(path: string): Uint8Array;
   text(path: string): string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: parsed XML is walked ad hoc by the tests
   xml(path: string): any;
   chartPaths(): string[];
   chartXml(i: number): string;
@@ -54,16 +54,19 @@ function escapeRe(s: string): string {
 
 /** Direct child tag names of the FIRST occurrence of `parentTag` (in document order). */
 export function elementOrder(xmlText: string, parentTag: string): string[] {
-  const open = new RegExp(`<${escapeRe(parentTag)}(?=[\\s/>])(?:\\s+[^\\s=/>]+\\s*=\\s*(?:"[^"]*"|'[^']*'))*\\s*(/?)>`, 'g');
+  const open = new RegExp(
+    `<${escapeRe(parentTag)}(?=[\\s/>])(?:\\s+[^\\s=/>]+\\s*=\\s*(?:"[^"]*"|'[^']*'))*\\s*(/?)>`,
+    'g',
+  );
   const m = open.exec(xmlText);
   if (!m) throw new Error(`elementOrder: <${parentTag}> not found`);
   if (m[1] === '/') return [];
-  const token = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w:.-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
+  const token =
+    /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w:.-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
   token.lastIndex = open.lastIndex;
   const out: string[] = [];
   let depth = 0;
-  let t: RegExpExecArray | null;
-  while ((t = token.exec(xmlText))) {
+  for (let t = token.exec(xmlText); t; t = token.exec(xmlText)) {
     const name = t[2];
     if (!name) continue; // comment / CDATA / PI
     const closing = t[1] === '/';
@@ -93,8 +96,7 @@ function childBlock(serXml: string, tag: string): string | undefined {
 function relsTargets(text: string): Array<{ id: string; type: string; target: string }> {
   const out: Array<{ id: string; type: string; target: string }> = [];
   const re = /<Relationship\s([^>]*?)\/?>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
+  for (let m = re.exec(text); m; m = re.exec(text)) {
     const attrs = m[1]!;
     const get = (n: string): string => decodeXmlEntities(new RegExp(`\\b${n}="([^"]*)"`).exec(attrs)?.[1] ?? '');
     out.push({ id: get('Id'), type: get('Type'), target: get('Target') });
@@ -129,8 +131,7 @@ export async function inspectXlsx(bytes: Uint8Array): Promise<XlsxInspection> {
     const wb = text('xl/workbook.xml');
     const out: Array<{ name: string; hidden: boolean }> = [];
     const re = /<sheet\s([^>]*?)\/?>/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(wb))) {
+    for (let m = re.exec(wb); m; m = re.exec(wb)) {
       const attrs = m[1]!;
       const name = decodeXmlEntities(/\bname="([^"]*)"/.exec(attrs)?.[1] ?? '');
       const state = /\bstate="([^"]*)"/.exec(attrs)?.[1];
@@ -150,9 +151,8 @@ export async function inspectXlsx(bytes: Uint8Array): Promise<XlsxInspection> {
     if (!files['xl/sharedStrings.xml']) return [];
     const out: string[] = [];
     const re = /<si>([\s\S]*?)<\/si>/g;
-    let m: RegExpExecArray | null;
     const sst = text('xl/sharedStrings.xml');
-    while ((m = re.exec(sst))) {
+    for (let m = re.exec(sst); m; m = re.exec(sst)) {
       const ts = [...m[1]!.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map((x) => decodeXmlEntities(x[1]!));
       out.push(ts.join(''));
     }
@@ -200,8 +200,7 @@ export async function inspectXlsx(bytes: Uint8Array): Promise<XlsxInspection> {
     sheetPath(name) {
       const wb = text('xl/workbook.xml');
       const re = /<sheet\s([^>]*?)\/?>/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(wb))) {
+      for (let m = re.exec(wb); m; m = re.exec(wb)) {
         const attrs = m[1]!;
         if (decodeXmlEntities(/\bname="([^"]*)"/.exec(attrs)?.[1] ?? '') !== name) continue;
         const rid = /\br:id="([^"]*)"/.exec(attrs)?.[1];
@@ -229,7 +228,9 @@ export async function inspectXlsx(bytes: Uint8Array): Promise<XlsxInspection> {
     hasImages: () => parts.some((p) => p.startsWith('xl/media/')),
     contentTypes() {
       const t = text('[Content_Types].xml');
-      return [...t.matchAll(/<(?:Default|Override)\s[^>]*\bContentType="([^"]*)"/g)].map((m) => decodeXmlEntities(m[1]!));
+      return [...t.matchAll(/<(?:Default|Override)\s[^>]*\bContentType="([^"]*)"/g)].map((m) =>
+        decodeXmlEntities(m[1]!),
+      );
     },
     assertWellFormed() {
       for (const p of parts) {

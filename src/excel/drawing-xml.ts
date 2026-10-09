@@ -71,7 +71,10 @@ function pictureXml(id: number, name: string, relId: string, anchor: AnchorSpec)
 /**
  * Build a drawing part. `targets[i]` is the relationship for `drawings[i]` (chart part or image).
  */
-export function buildDrawingXml(drawings: readonly DrawingSpec[], targets: readonly DrawingTarget[]): { xml: string; relsXml: string } {
+export function buildDrawingXml(
+  drawings: readonly DrawingSpec[],
+  targets: readonly DrawingTarget[],
+): { xml: string; relsXml: string } {
   if (targets.length !== drawings.length) throw new Error('buildDrawingXml: one target per drawing is required');
   const anchors: string[] = [];
   const rels: string[] = [];
@@ -87,7 +90,9 @@ export function buildDrawingXml(drawings: readonly DrawingSpec[], targets: reado
       rels.push(`<Relationship Id="${t.relId}" Type="${REL_IMAGE}" Target="${escapeAttr(t.target)}"/>`);
     }
   });
-  const xml = xmlDocument(`<xdr:wsDr xmlns:xdr="${NS_XDR}" xmlns:a="${NS_A}" xmlns:r="${NS_R}">${anchors.join('')}</xdr:wsDr>`);
+  const xml = xmlDocument(
+    `<xdr:wsDr xmlns:xdr="${NS_XDR}" xmlns:a="${NS_A}" xmlns:r="${NS_R}">${anchors.join('')}</xdr:wsDr>`,
+  );
   const relsXml = xmlDocument(
     `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels.join('')}</Relationships>`,
   );

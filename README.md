@@ -26,10 +26,10 @@ npm install highcharts-editable-excel
 yarn add highcharts-editable-excel
 ```
 
-- Peer dependency: `highcharts >= 11`. The tested versions are 12.6.2 and 13.1.1 (see [Compatibility matrix](#compatibility-matrix)).
+- Peer dependency: `highcharts >= 11`. The tested versions are 11.4.9, 12.6.2 and 13.1.1 (see [Compatibility matrix](#compatibility-matrix)). On Highcharts 11 the CommonJS module files are factories: call them with the namespace (`import Exporting from 'highcharts/modules/exporting'; Exporting(Highcharts);`) instead of relying on a side-effect import.
 - The context-menu integration needs the Highcharts **exporting** module (`highcharts/modules/exporting`). The programmatic API does not need it, except for the optional reference image.
 - The `export-data` module is **not** required.
-- The package is ESM only (`"type": "module"`) and has no side effects on import. `dist/index.js` is about 253 KB minified, about 69 KB gzipped.
+- The package ships ESM (`dist/index.js`, for `import` and bundlers) and CommonJS (`dist/index.cjs`, for `require`) builds with matching type declarations, and has no side effects on import. It bundles [fflate](https://github.com/101arrowz/fflate) (MIT); see `THIRD_PARTY_LICENSES.md`.
 
 ## Quick start
 
@@ -205,10 +205,10 @@ Every function is a named export of `highcharts-editable-excel`. Charts are type
 | --- | --- | --- |
 | `installHighchartsExcelExport(Highcharts: unknown, options?: InstallOptions)` | `Installation` | `INVALID_OPTIONS` if the argument is not the Highcharts namespace; `EXPORTING_MODULE_MISSING` if the exporting module is not loaded |
 | `addEditableExcelMenuItem(chart: unknown, options?: InstallOptions)` | `void` | `INVALID_CHART` if the argument is not a rendered chart with `update()` |
-| `exportHighchartsToXlsx(chart: unknown, options?: ExportOptions)` | `Promise<ExportResult>` | `INVALID_CHART`, `CHART_NOT_EDITABLE`, `INVALID_OPTIONS` (bad `transformModel` result), `WRITER_FAILURE` |
+| `exportHighchartsToXlsx(chart: unknown, options?: ExportOptions)` | `Promise<ExportResult>` | `INVALID_CHART`, `CHART_NOT_EDITABLE`, `INVALID_OPTIONS` (invalid option value, bad `transformModel` result), `WRITER_FAILURE` |
 | `downloadHighchartsAsXlsx(chart: unknown, options?: ExportOptions)` | `Promise<ExportResult>` | Same as above, plus `BROWSER_REQUIRED` |
 | `triggerDownload(bytes: Uint8Array, filename: string, mimeType = XLSX_MIME_TYPE)` | `void` | `BROWSER_REQUIRED` if `document`, `Blob` or `URL.createObjectURL` is missing |
-| `analyzeChartCompatibility(chart: unknown, options?: ExportOptions)` | `CompatibilityReport` (synchronous) | `INVALID_CHART` only; a blocked chart returns `editable: false` |
+| `analyzeChartCompatibility(chart: unknown, options?: ExportOptions)` | `CompatibilityReport` (synchronous) | `INVALID_CHART` and `INVALID_OPTIONS`; a blocked chart returns `editable: false` instead of throwing |
 | `exportHighchartsOptionsToXlsx(highchartsOptions: object, options?: ExportOptions)` | `Promise<ExportResult>` | `INVALID_OPTIONS` (not an object), `CHART_NOT_EDITABLE`, `WRITER_FAILURE` |
 | `exportChartsToWorkbook(entries: MultiChartExportEntry[], options?: { filename?: string; properties?: { title?: string; creator?: string }; strictMode?: boolean; writer?: ExcelWriter })` | `Promise<MultiChartExportResult>` | `INVALID_OPTIONS` (empty or non-array input, non-object entry), `INVALID_CHART` and `CHART_NOT_EDITABLE` (the message names the entry index), `WRITER_FAILURE` |
 
@@ -217,9 +217,11 @@ Notes:
 - `installHighchartsExcelExport` is **idempotent per Highcharts namespace**. A second call returns the first `Installation`, and the first call's options win. `installation.uninstall()` removes the item definition and restores the global menu. Charts created after that are unaffected, and a new install is then allowed.
 - `addEditableExcelMenuItem` patches an already-rendered chart through `chart.update()`. Use it for charts created before the install. It is a no-op when the chart already lists the item or has `exporting.editableExcel.enabled === false`.
 - `analyzeChartCompatibility` runs the same extraction and translation as an export but writes nothing and never renders the reference image.
+- Errors thrown by **your own callbacks** (`onWarning`, `hooks.transformModel`) are not wrapped: they propagate from every function above exactly as thrown.
+- In a browser, the async exports yield to the event loop between the extract, translate and write phases, so a spinner can repaint. Each phase is still synchronous on the main thread.
 - `exportChartsToWorkbook` names the sheets `Chart 1`/`Data 1`, `Chart 2`/`Data 2` and so on unless an entry sets `chartSheetName`/`dataSheetName`. Names that collide are de-duplicated with ` (2)`, ` (3)` and reported as `SHEET_NAME_ADJUSTED`. The default filename is `charts.xlsx`. The workbook title comes from the first chart.
 
-Lower-level building blocks are also exported: `CHART_TYPE_MATRIX`, `resolveChartType(model)`, `translateChartModel(model, options)`, `extractChartModel(chart, options)`, `extractChartModelFromOptions(options, extractOptions)`, `createDefaultExcelWriter()`, `DiagnosticCollector`, `createDiagnostic`, `buildCompatibilityReport`, and the types `ChartModel`, `WorkbookSpec`, `ExcelWriter` and related. See [Custom writer and pipeline](#custom-writer-and-pipeline).
+Lower-level building blocks are also exported: `CHART_TYPE_MATRIX`, `resolveChartType(model)`, `translateChartModel(model, options)`, `extractChartModel(chart, options)`, `extractChartModelFromOptions(options, extractOptions)`, `createDefaultExcelWriter()`, `DiagnosticCollector`, `createDiagnostic`, `buildCompatibilityReport`, and the types `ChartModel`, `WorkbookSpec`, `ExcelWriter` and related. See [Custom writer and pipeline](#custom-writer-and-pipeline). `extractChartModel`, `extractChartModelFromOptions`, `translateChartModel`, `resolveChartType`, `createDefaultExcelWriter`, `DiagnosticCollector` and the IR/spec types are **experimental**: unstable, may change in minor versions.
 
 Constants: `XLSX_MIME_TYPE`, `DEFAULT_MENU_TEXT` (`"Download editable Excel chart"`), `DEFAULT_MENU_ITEM_KEY` (`"downloadEditableXLSX"`).
 
@@ -236,7 +238,7 @@ Constants: `XLSX_MIME_TYPE`, `DEFAULT_MENU_TEXT` (`"Download editable Excel char
 | `seriesVisibility` | `'visible' \| 'all'` | `'visible'` | `'visible'` skips hidden series (`HIDDEN_SERIES_EXCLUDED`). `'all'` exports them, and they are visible in Excel (`HIDDEN_SERIES_INCLUDED`). |
 | `onWarning` | `(d: Diagnostic) => void` | none | Called once per distinct diagnostic (same code, property and series) as it is raised. |
 | `themeOverrides` | `ThemeOverrides` | none | Explicit styling applied after extraction. See [Theme overrides](#theme-overrides). |
-| `chartWidth`, `chartHeight` | `number` (CSS px) | Rendered size (`chart.chartWidth`/`chartHeight`; options path: `chart.width`/`height`, else 600×400) | Size of the Excel chart object (minimum 50). |
+| `chartWidth`, `chartHeight` | `number` (CSS px) | Rendered size (`chart.chartWidth`/`chartHeight`; options path: `chart.width`/`height`, else 600×400) | Size of the Excel chart object: a finite number from 50 to 20000, otherwise `INVALID_OPTIONS`. |
 | `strictMode` | `boolean` | `false` | Also throw `CHART_NOT_EDITABLE` when any diagnostic has outcome `unsupported` at `warning` or `error` severity (for example annotations, plot bands, formatter callbacks). Blocking diagnostics always throw, with or without strict mode. Reference-image diagnostics are ignored. |
 | `includeReferenceImage` | `boolean` | `false` | Opt-in. Embeds a PNG of the Highcharts rendering to the right of the native chart for side-by-side comparison. Needs a real browser and `chart.getSVG` (exporting module). Otherwise the export continues without it and reports `WRITER_LIMITATION`. |
 | `includeModel` | `boolean` | `false` | Adds the normalized `ChartModel` to `result.model` (debugging). |
@@ -285,7 +287,7 @@ Highcharts.chart('container', {
 });
 ```
 
-If the chart sets its own `exporting.buttons.contextButton.menuItems`, the item is appended to that list (the caller's array is not mutated). TypeScript users can declare the option with a module augmentation. The library does not ship one; see [`examples/typescript/main.ts`](examples/typescript/main.ts):
+If the chart sets its own `exporting.buttons.contextButton.menuItems`, the item is appended to that list. The caller's options object is never modified (frozen or shared option objects work); the change is made on the chart's own copy. `enabled`, `menuText` and `menuItems` are applied when the chart is **created**: after `chart.update({ exporting: … })` changes them, call `addEditableExcelMenuItem(chart)` again. TypeScript users can declare the option with a module augmentation. The library does not ship one; see [`examples/typescript/main.ts`](examples/typescript/main.ts):
 
 ```ts
 declare module 'highcharts' {
@@ -304,7 +306,7 @@ interface ExportResult {
   mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   warnings: Diagnostic[];
   report: CompatibilityReport;
-  timings: { extractMs: number; translateMs: number; writeMs: number; totalMs: number };
+  timings: { extractMs: number; translateMs: number; writeMs: number; imageMs?: number; totalMs: number }; // imageMs: reference image, 0 when none
   model?: ChartModel;                 // with includeModel: true
 }
 
@@ -340,16 +342,16 @@ interface Diagnostic {
 
 ### `ExportError`
 
-`class ExportError extends Error` with `name: 'HighchartsExcelExportError'`, `code: ExportErrorCode` and `details: { chartId?, property?, diagnostics?, cause? }`.
+`class ExportError extends Error` with `name: 'HighchartsExcelExportError'`, `code: ExportErrorCode`, `details: { chartId?, property?, diagnostics? }` and the standard `cause` (the underlying error, when there is one).
 
 | Code | Thrown when |
 | --- | --- |
 | `INVALID_CHART` | The argument is not a rendered chart (it needs `series`, `xAxis` and `yAxis` arrays, `options`, and `renderTo` or `container`). |
-| `INVALID_OPTIONS` | `installHighchartsExcelExport` did not get a Highcharts namespace; `exportHighchartsOptionsToXlsx` did not get an object; `hooks.transformModel` returned something that is not a model; `exportChartsToWorkbook` got an empty or invalid list. |
+| `INVALID_OPTIONS` | An `ExportOptions` value is invalid (unknown `fidelity`/`dataMode`/`seriesVisibility`, `chartWidth`/`chartHeight` not a finite number from 50 to 20000, a non-string sheet name or filename, a non-function `onWarning` or `hooks.transformModel`, a `writer` without `write`); `details.property` names the option. Also: `installHighchartsExcelExport` did not get a Highcharts namespace; `exportHighchartsOptionsToXlsx` did not get an object; `hooks.transformModel` returned something that is not a model; `exportChartsToWorkbook` got an empty or invalid list. |
 | `CHART_NOT_EDITABLE` | Any **blocking** diagnostic: polar chart, no series or no data, only unsupported series types, pie or bubble combined with other types, or worksheet row or column limit exceeded. In strict mode, also any `unsupported` warning. `details.diagnostics` lists the causes. |
 | `EXPORTING_MODULE_MISSING` | `installHighchartsExcelExport` was called before `highcharts/modules/exporting` was loaded. |
 | `BROWSER_REQUIRED` | `triggerDownload` or `downloadHighchartsAsXlsx` ran outside a browser. |
-| `WRITER_FAILURE` | The writer (built-in or `options.writer`) threw. For example, the built-in writer refuses a plot group with more than 255 series. `details.cause` holds the original error. |
+| `WRITER_FAILURE` | The writer (built-in or `options.writer`) threw. For example, the built-in writer refuses a plot group with more than 255 series. `error.cause` holds the original error. |
 
 Unsupported chart types and worksheet row or column overflows are not error codes of their own. They arrive as diagnostic codes (`UNSUPPORTED_CHART_TYPE`, `ROW_LIMIT_EXCEEDED`, `COLUMN_LIMIT_EXCEEDED`) in `details.diagnostics` of a `CHART_NOT_EDITABLE` error.
 
@@ -433,10 +435,10 @@ Per-option detail (option path, outcome, diagnostic) is in [docs/compatibility.m
 
 ### Tested versions and environments
 
-- **Highcharts 12.6.2 and 13.1.1.** The extraction, menu-install, export-fixture and compatibility-matrix suites run once per version (`*.v12.test.ts` / `*.v13.test.ts`). The other suites that use Highcharts run on 13.1.1. Other versions within the `>= 11` peer range are untested.
-- **Node 22 + jsdom** (vitest). The `.xlsx` packages are inspected structurally, and the writer output round-trips through `@office-kit/xlsx`'s strict chart parser.
+- **Highcharts 11.4.9, 12.6.2 and 13.1.1.** The extraction, menu-install, export-fixture and compatibility-matrix suites run once per version (`*.v11.test.ts` / `*.v12.test.ts` / `*.v13.test.ts`); tested against 11.4.9. The other suites that use Highcharts run on 13.1.1. Other versions within the `>= 11` peer range are untested.
+- **Node 22 and 24 + jsdom** (vitest; CI runs both). The `.xlsx` packages are inspected structurally, and the writer output round-trips through `@office-kit/xlsx`'s strict chart parser.
 - **Chromium** via Playwright (demo end-to-end tests).
-- **LibreOffice** headless render to PDF as a smoke check, when `soffice` is on the PATH.
+- **LibreOffice** headless render to PDF as a smoke check, when `soffice` is on the PATH (CI installs it and sets `REQUIRE_RENDER=1`, so a missing toolchain fails there instead of skipping).
 
 **The generated workbooks were not opened in Microsoft Excel in the development environment.** Structural validation and LibreOffice rendering do not replace a check in Excel. Follow [docs/manual-qa.md](docs/manual-qa.md) before relying on a chart type in production.
 
@@ -463,11 +465,12 @@ Excel's chart engine is not Highcharts. Expect these differences:
 ## Data semantics
 
 - **`dataMode: 'rendered'` (default)** exports the points the chart currently shows: after `setData`/`update`, after data grouping and after cropping. Grouped series report `DATA_GROUPED` and cropped series `DATA_CROPPED`. Both are info diagnostics with source and rendered point counts in `details`.
-- **`dataMode: 'raw'`** parses `series.options.data` the way Highcharts does: numbers, `null`, `[x, y]`, `[x, y, z]`, `[name, y]` and point objects. Missing x values follow `pointStart`/`pointInterval`/`pointIntervalUnit`, with calendar units computed in UTC. If the source data is not available (for example data loaded through a data table), the rendered points are used (`DATA_MODE_FALLBACK`). The options-object API always uses raw data.
+- **`dataMode: 'raw'`** parses `series.options.data` the way Highcharts does: numbers, `null`, `[x, y]`, `[x, y, z]`, `[name, y]`, arrays mapped through `series.keys`, point objects and typed arrays (y values). Missing x values follow `pointStart`/`pointInterval`/`pointIntervalUnit` (calendar units are stepped on the dates the chart displays), and `relativeXValue` x values count intervals from `pointStart`. On datetime axes, date strings (`'2024-01-01'`, also as `pointStart`) are parsed; strings that are not dates are skipped (`NON_NUMERIC_VALUE`). If the source data is not available (for example data loaded through a data table), the rendered points are used (`DATA_MODE_FALLBACK`). The options-object API always uses raw data.
+- **Boost module.** A boosted series keeps only pixel positions in `series.points`, so its values are read from the series data instead (`DATA_MODE_FALLBACK`, info).
 - **Hidden series:** see `seriesVisibility`. A hidden pie slice is exported and shown (`HIDDEN_POINT`).
 - **Nulls vs missing points.** A `null` y becomes an empty cell, drawn as a gap (`NULL_VALUES`, info). A series without a value for a category another series has also gets an empty cell (`UNALIGNED_X_VALUES`). Values that are not numeric are skipped (`NON_NUMERIC_VALUE`).
 - **Zoom.** A zoomed axis (`userMin`/`userMax`) is exported as fixed axis bounds for the visible window.
-- **Dates** are written as Excel serial numbers computed from the UTC timestamp, with no time-zone shift, and formatted from the axis label format when it can be translated.
+- **Dates** are written as Excel serial numbers of the **wall-clock time the chart displays**. Excel has no time zones, so with `time.timezone` (or the legacy `useUTC: false` / `timezoneOffset`) each datetime x value is moved by the zone's offset at that instant (`APPROXIMATED_DATETIME`, info, property `time.timezone`; the offset of the first point is in `model.meta.datetimeOffsetMinutes`). UTC charts are unchanged. Dates are formatted from the axis label format when it can be translated.
 - **Category charts** share one category column. Numeric and datetime x values are the sorted union across series. Categories follow the axis order, or first appearance when points are matched by name. Pie series share a `Category` column. Scatter and bubble series get their own X/Y(/Size) blocks.
 - **Nothing is fabricated.** No values are interpolated, no unknown point shapes are guessed, and no rows are invented. Missing data stays empty, and every gap is reported.
 
@@ -622,27 +625,42 @@ return loggingWriter.write({ properties: { title: 'Manual' }, sheets: translatio
 | --- | --- |
 | `ExportError: EXPORTING_MODULE_MISSING` | Load `highcharts/modules/exporting` (or `modules/exporting.js` from the CDN) **before** calling `installHighchartsExcelExport`. |
 | The menu item does not show | Charts created *before* the install, or charts whose `menuItems` were replaced later with `chart.update()`, are not patched. Call `addEditableExcelMenuItem(chart)`. Also check `exporting.editableExcel.enabled !== false` and that `exporting.enabled` is not `false`. |
+| `chart.update({ exporting: … })` did not change the item | Per-chart `exporting.editableExcel` (`enabled`, `menuText`) and `menuItems` are applied when the chart is created; there is no update hook. Call `addEditableExcelMenuItem(chart)` after the update. Export options in `editableExcel` (filename, sheet names…) are read on each click and need nothing. |
 | `CHART_NOT_EDITABLE` | Inspect `error.details.diagnostics` or run `analyzeChartCompatibility(chart)`. The usual causes are polar charts, only unsupported series types, pie or bubble mixed with other types, an empty chart, or `strictMode` with an unsupported feature. |
 | Nothing downloads / `BROWSER_REQUIRED` | `downloadHighchartsAsXlsx` needs `document` and `URL.createObjectURL`. In Node or a worker, use `exportHighchartsToXlsx` or `exportHighchartsOptionsToXlsx` and handle `bytes` yourself. Browsers can also block downloads that are not triggered by a user gesture, or in sandboxed iframes without `allow-downloads`. Trigger the export from a click. |
 | Wrong colors in styled mode on the server | CSS is not readable without a real browser (`STYLED_MODE_FALLBACK`). Pass `themeOverrides.colors` (and backgrounds or fonts). |
-| Dates shifted by some hours | Timestamps are written as UTC serials. `chart.time` time-zone settings are not applied to the cells. Export timestamps at UTC midnight for whole days, or adjust the data before exporting. |
-| Large charts are slow | All points are written to the sheet and to the chart cache. Use `dataMode: 'rendered'` with data grouping, or fewer points. `result.timings` shows where the time goes. For measurements, run `pnpm bench`; it prints a table and writes `tests/output/bench.json`. |
+| Dates shifted by some hours | Cells hold the wall-clock time the chart displays in its `time.timezone` (`APPROXIMATED_DATETIME` reports the shift). On the options path the zone comes from `options.time` only: a zone set globally with `Highcharts.setOptions({ time })` is not visible there, so pass `time` in the options. An unknown zone name is exported as UTC (`APPROXIMATED_DATETIME`, warning). |
+| Large charts are slow | All points are written to the sheet and to the chart cache. Use `dataMode: 'rendered'` with data grouping, or fewer points. `result.timings` shows where the time goes. For measurements, run `pnpm bench`; it prints a table and writes `tests/output/bench.json`. The export runs on the main thread and only yields between phases; an asynchronous ZIP step / Web Worker export is on the roadmap. |
 | Vite / CJS errors importing Highcharts modules | Highcharts ships UMD/CJS files without an exports map. Import modules as side effects (`import 'highcharts/modules/exporting'`, not as factories). With Vite, list them in `optimizeDeps.include`, as `demo/vite.config.ts` does. |
 
 ## Development
 
 ```bash
 pnpm install
-pnpm typecheck     # tsc on src, tests, e2e, demo, scripts
-pnpm build         # tsup → dist/index.js (ESM) + dist/index.d.ts
+pnpm typecheck     # tsc on src, tests, e2e, demo (incl. demo/vite.config.ts), scripts
+pnpm lint          # biome check . (lint rules + formatting; biome.json)
+pnpm lint:fix      # biome check --write . (safe fixes + formatting)
+pnpm format        # biome format --write .
+pnpm build         # tsup → dist/index.js (ESM) + dist/index.cjs (CJS) + dist/index.d.ts/.d.cts
 pnpm test          # vitest (jsdom): unit + integration, writes tests/output/**
+pnpm coverage      # same suite with v8 coverage; fails below lines 90 / functions 92 / branches 78 / statements 87
 pnpm test:e2e      # Playwright against the Vite demo (set PW_CHROMIUM_EXECUTABLE to use a preinstalled Chromium)
 pnpm demo          # Vite demo on http://127.0.0.1:4173
-pnpm bench         # export timing benchmark (prints a table, writes tests/output/bench.json)
-pnpm coverage      # vitest with v8 coverage (text summary + HTML under tests/output/coverage)
-pnpm pack-check    # pack, install the tarball in a temp project, verify exports and that Highcharts is not bundled
+pnpm demo:build    # production build of the demo into dist-demo/
+pnpm bench         # export timing benchmark (sets BENCH=1; prints a table, writes tests/output/bench.json)
+pnpm pack-check    # build (skip with --no-build when dist/ exists), pack, run publint + attw on the tarball,
+                   # install it in a temp project, check every src/index.ts export and that Highcharts is not bundled
 pnpm examples:typecheck  # tsc -p examples/tsconfig.json (examples against src/)
+pnpm validate:xsd  # XSD-validate tests/output/{export/v13,writer}/*.xlsx (run pnpm test first; needs OOXML_SCHEMA_DIR + lxml)
+pnpm check         # typecheck + build + test
 ```
+
+- **Render checks.** `tests/integration/render-libreoffice.test.ts` and `writer-render.test.ts` render workbooks with LibreOffice (`soffice`) and poppler (`pdftoppm`, `pdftotext`). They skip with a printed reason when the tools are missing, unless `REQUIRE_RENDER=1` is set, in which case they fail. CI installs `libreoffice-calc` and `poppler-utils` and sets it.
+- **OOXML schema validation (optional).** `scripts/validate-ooxml.py` validates every XML part of the given workbooks against the ECMA-376 schemas with Python `lxml`. The schemas are not shipped: download ECMA-376 Part 1/4 schemas from ecma-international.org and set `OOXML_SCHEMA_DIR` to a folder with `ISO-IEC29500-4_2016/*.xsd` and `ecma/fouth-edition/opc-*.xsd`. Exit codes: 0 valid, 1 schema errors (printed with file, part and line; only the known `xml:space` on `<t>` false positive is ignored), 2 missing schemas/lxml. `writer-render.test.ts` runs it on the writer fixtures when both are available and skips with a printed reason otherwise (also under `REQUIRE_RENDER=1`). Schema-valid is still not proof that Excel opens the file.
+- **Benchmark.** `tests/integration/bench.test.ts` only runs when `BENCH=1` (`pnpm bench` sets it).
+- **Publishing.** `prepublishOnly` runs `pnpm check && pnpm pack-check`. Pushing a `v*` tag runs `.github/workflows/release.yml`: install, `pnpm check`, `pnpm pack-check`, then `pnpm publish --provenance --access public` with the `NPM_TOKEN` secret. `publishConfig` sets public access and provenance. See [CHANGELOG.md](CHANGELOG.md).
+- **CI** (`.github/workflows/ci.yml`) runs on Node 22 and 24: typecheck, build, examples typecheck, demo build, coverage with thresholds and `REQUIRE_RENDER=1`, e2e and pack-check, and uploads the generated workbooks, renders and e2e output.
+- `.npmrc` sets `engine-strict=true`, so installs fail on Node < 22.
 
 Repository layout:
 
@@ -679,7 +697,7 @@ Highcharts chart / options
 2. Map it to a plot group in `src/core/chart-type-registry.ts` (`KIND_TO_GROUP`, combination rules) and add a `CHART_TYPE_MATRIX` row.
 3. If Excel needs a new plot-group kind, extend `PlotGroupSpec` in `src/excel/writer-interface.ts` and emit it in `src/excel/chart-xml.ts`, following the schema element order.
 4. Handle it in `translateChartModel` and, if it has its own data shape, in `src/core/data-layout.ts`.
-5. Add tests for both Highcharts versions and update the matrix here and in `docs/compatibility.md`.
+5. Add tests for every tested Highcharts version and update the matrix here and in `docs/compatibility.md`.
 
 **Adding a translator:** write a pure function in `src/translators/` that returns its result plus an optional `Diagnostic` built with `createDiagnostic`. Call it from the extractor or `src/core/style-mapping.ts`, and add a new code to `DiagnosticCode` in `src/types/diagnostics.ts` if needed. Data-related codes also go into the `dataConcerns` set there.
 

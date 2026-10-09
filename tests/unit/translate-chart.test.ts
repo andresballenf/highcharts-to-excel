@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { translateChartModel, baseTimeUnitOf, type TranslateOptions, type TranslationResult } from '../../src/core/translate-chart';
+import {
+  translateChartModel,
+  baseTimeUnitOf,
+  type TranslateOptions,
+  type TranslationResult,
+} from '../../src/core/translate-chart';
 import { DiagnosticCollector } from '../../src/types/diagnostics';
 import type { ChartModel } from '../../src/types/chart-model';
 import type { ExcelChartSpec, PlotGroupSpec, SheetSpec } from '../../src/excel/writer-interface';
 import * as F from '../fixtures/chart-models';
 
-function run(model: ChartModel, extra: Partial<TranslateOptions> = {}): { r: TranslationResult; d: DiagnosticCollector; chart: ExcelChartSpec } {
+function run(
+  model: ChartModel,
+  extra: Partial<TranslateOptions> = {},
+): { r: TranslationResult; d: DiagnosticCollector; chart: ExcelChartSpec } {
   const d = new DiagnosticCollector();
   const r = translateChartModel(model, {
     chartSheetName: 'Chart',
@@ -21,7 +29,8 @@ function run(model: ChartModel, extra: Partial<TranslateOptions> = {}): { r: Tra
 }
 
 const codes = (d: DiagnosticCollector) => d.items.map((x) => x.code);
-const headerRow = (sheet: SheetSpec) => sheet.rows[0]!.cells.map((c) => (c.value.type === 'string' ? c.value.value : '?'));
+const headerRow = (sheet: SheetSpec) =>
+  sheet.rows[0]!.cells.map((c) => (c.value.type === 'string' ? c.value.value : '?'));
 function group<K extends PlotGroupSpec['kind']>(chart: ExcelChartSpec, kind: K): Extract<PlotGroupSpec, { kind: K }> {
   return chart.plotGroups.find((g) => g.kind === kind) as Extract<PlotGroupSpec, { kind: K }>;
 }
@@ -34,14 +43,29 @@ describe('translateChartModel: structure', () => {
     expect(r.sheets.map((s) => s.name)).toEqual(['Chart', 'Data']);
     const chartSheet = r.sheets[0]!;
     expect(chartSheet.freezeHeaderRow).toBe(false);
-    expect(chartSheet.rows).toEqual([{ row0: 0, cells: [{ col0: 0, row0: 0, value: { type: 'string', value: 'Monthly sales' }, style: { bold: true } }] }]);
+    expect(chartSheet.rows).toEqual([
+      {
+        row0: 0,
+        cells: [{ col0: 0, row0: 0, value: { type: 'string', value: 'Monthly sales' }, style: { bold: true } }],
+      },
+    ]);
     expect(chartSheet.drawings[0]).toMatchObject({
       kind: 'chart',
       name: 'Chart 1',
       anchor: { col0: 0, row0: 2, colOffsetPx: 0, rowOffsetPx: 0, widthPx: 600, heightPx: 400 },
     });
-    expect(chart.title).toEqual({ lines: ['Monthly sales'], font: expect.objectContaining({ typeface: 'Helvetica', sizeHundredthsPt: 1350 }), overlay: false });
-    expect(chart.textDefaults).toEqual({ typeface: 'Helvetica', sizeHundredthsPt: 900, bold: false, italic: false, colorHex: '333333' });
+    expect(chart.title).toEqual({
+      lines: ['Monthly sales'],
+      font: expect.objectContaining({ typeface: 'Helvetica', sizeHundredthsPt: 1350 }),
+      overlay: false,
+    });
+    expect(chart.textDefaults).toEqual({
+      typeface: 'Helvetica',
+      sizeHundredthsPt: 900,
+      bold: false,
+      italic: false,
+      colorHex: '333333',
+    });
     expect(chart.dispBlanksAs).toBe('gap');
     expect(chart.style).toBeNull();
     expect(chart.legend).toMatchObject({ position: 'b', overlay: false });
@@ -60,12 +84,21 @@ describe('translateChartModel: structure', () => {
 
   it('honours chartWidth/chartHeight, hidden data sheet and the reference image', () => {
     const png = new Uint8Array([1, 2, 3]);
-    const { r } = run(F.lineModel(), { chartWidth: 300, chartHeight: 200, includeSourceData: false, referenceImage: { png, widthPx: 600, heightPx: 400 } });
+    const { r } = run(F.lineModel(), {
+      chartWidth: 300,
+      chartHeight: 200,
+      includeSourceData: false,
+      referenceImage: { png, widthPx: 600, heightPx: 400 },
+    });
     expect(r.sheets[1]!.hidden).toBe(true);
     const [chartD, img] = r.sheets[0]!.drawings;
     expect(chartD!.anchor).toMatchObject({ widthPx: 300, heightPx: 200 });
     // 300 + 20 px = 5 default columns (64 px) + 0 px.
-    expect(img).toMatchObject({ kind: 'image', png, anchor: { col0: 5, row0: 2, colOffsetPx: 0, widthPx: 300, heightPx: 200 } });
+    expect(img).toMatchObject({
+      kind: 'image',
+      png,
+      anchor: { col0: 5, row0: 2, colOffsetPx: 0, widthPx: 300, heightPx: 200 },
+    });
   });
 
   it('deletes the title when the model has none', () => {
@@ -117,7 +150,11 @@ describe('translateChartModel: combos and axes', () => {
     expect(val2).toMatchObject({ kind: 'val', position: 'r', crosses: 'max', crossAxisId: 1001, deleted: false });
     expect(val2.title!.lines).toEqual(['Temperature (°C)']);
     expect(chart.axes.find((a) => a.id === 2000)!.numberFormat).toEqual({ code: '0" mm"', sourceLinked: false });
-    expect(d.items.find((x) => x.code === 'SECONDARY_AXIS')).toMatchObject({ outcome: 'translated', severity: 'info', property: 'yAxis[1]' });
+    expect(d.items.find((x) => x.code === 'SECONDARY_AXIS')).toMatchObject({
+      outcome: 'translated',
+      severity: 'info',
+      property: 'yAxis[1]',
+    });
     expect(group(chart, 'line').series[0]!.smooth).toBe(true);
     expect(r.supportedProperties).toContain('series[1].yAxis');
   });
@@ -176,9 +213,12 @@ describe('translateChartModel: combos and axes', () => {
   it('stacked columns: overlap 100, gap from groupPadding, labels never outEnd', () => {
     const { chart, d } = run(F.columnStackedModel());
     const bar = group(chart, 'bar');
-    expect(bar).toMatchObject({ grouping: 'stacked', overlap: 100, gapWidth: 67 });
+    expect(bar).toMatchObject({ grouping: 'stacked', overlap: 100, gapWidth: 108 });
     expect(bar.series[0]!.dataLabels!.position).toBe('inEnd');
-    expect(d.items.find((x) => x.code === 'APPROXIMATED_DATA_LABELS')).toMatchObject({ property: 'series[0].dataLabels.position', seriesIndex: 0 });
+    expect(d.items.find((x) => x.code === 'APPROXIMATED_DATA_LABELS')).toMatchObject({
+      property: 'series[0].dataLabels.position',
+      seriesIndex: 0,
+    });
     expect(d.items.find((x) => x.code === 'UNSUPPORTED_STYLE')).toMatchObject({ property: 'series[0].borderRadius' });
   });
 
@@ -192,10 +232,20 @@ describe('translateChartModel: combos and axes', () => {
   it('datetime x → date axis with serial categories and a day-based major unit', () => {
     const { chart, r } = run(F.datetimeModel());
     const cat = chart.axes.find((a) => a.id === 1000)!;
-    expect(cat).toMatchObject({ kind: 'date', dateAxis: { baseTimeUnit: 'days' }, majorUnit: 2, numberFormat: { code: 'ddd d mmm', sourceLinked: false } });
+    expect(cat).toMatchObject({
+      kind: 'date',
+      dateAxis: { baseTimeUnit: 'days' },
+      majorUnit: 2,
+      numberFormat: { code: 'ddd d mmm', sourceLinked: false },
+    });
     const s = group(chart, 'line').series[0]!;
     expect(s.categories).toMatchObject({ kind: 'num', cache: [45292, 45293, 45294, 45295], formatCode: 'yyyy-mm-dd' });
-    expect(r.sheets[1]!.rows[1]!.cells[0]).toEqual({ col0: 0, row0: 1, value: { type: 'number', value: 45292 }, style: { numberFormat: 'yyyy-mm-dd' } });
+    expect(r.sheets[1]!.rows[1]!.cells[0]).toEqual({
+      col0: 0,
+      row0: 1,
+      value: { type: 'number', value: 45292 },
+      style: { numberFormat: 'yyyy-mm-dd' },
+    });
   });
 
   it('monthly data uses a months base unit; intraday data falls back to a category axis', () => {
@@ -203,7 +253,10 @@ describe('translateChartModel: combos and axes', () => {
     expect(baseTimeUnitOf([Date.UTC(2023, 0, 1), Date.UTC(2024, 0, 1)])).toBe('years');
     expect(baseTimeUnitOf([Date.UTC(2024, 0, 1), Date.UTC(2024, 0, 2)])).toBe('days');
     const m = F.datetimeModel();
-    m.series[0] = { ...m.series[0]!, points: m.series[0]!.points.map((p, i) => ({ ...p, x: Date.UTC(2024, 0, 1, i) })) };
+    m.series[0] = {
+      ...m.series[0]!,
+      points: m.series[0]!.points.map((p, i) => ({ ...p, x: Date.UTC(2024, 0, 1, i) })),
+    };
     const { chart, d } = run(m);
     expect(chart.axes[0]!.kind).toBe('cat');
     expect(codes(d)).toContain('APPROXIMATED_DATETIME');
@@ -227,7 +280,16 @@ describe('translateChartModel: combos and axes', () => {
 
   it('scatter inside a combo gets its own hidden axis pair', () => {
     const m = F.comboModel();
-    m.series.push(F.series({ kind: 'scatter', index: 2, name: 'Pts', points: [F.point({ x: 0.5, y: 3 })], line: { color: null, width: 1, dash: 'solid' }, smooth: true }));
+    m.series.push(
+      F.series({
+        kind: 'scatter',
+        index: 2,
+        name: 'Pts',
+        points: [F.point({ x: 0.5, y: 3 })],
+        line: { color: null, width: 1, dash: 'solid' },
+        smooth: true,
+      }),
+    );
     const { chart, d } = run(m);
     expect(group(chart, 'scatter')).toMatchObject({ axisIds: [3000, 3001], scatterStyle: 'smoothMarker' });
     expect(chart.axes.filter((a) => a.id >= 3000).every((a) => a.deleted)).toBe(true);
@@ -245,7 +307,10 @@ describe('translateChartModel: combos and axes', () => {
   it('reports multiple x axes', () => {
     const m = F.comboModel();
     m.xAxes.push(F.axis({ index: 1, kind: 'linear' }));
-    expect(run(m).d.items.find((x) => x.code === 'MULTIPLE_X_AXES')).toMatchObject({ outcome: 'approximated', property: 'xAxis[1]' });
+    expect(run(m).d.items.find((x) => x.code === 'MULTIPLE_X_AXES')).toMatchObject({
+      outcome: 'approximated',
+      property: 'xAxis[1]',
+    });
   });
 });
 
@@ -268,7 +333,25 @@ describe('translateChartModel: pie and doughnut', () => {
     expect(s.dataPoints.map((p) => p.explosion)).toEqual([null, 3, null, null]);
     expect(s.dataPoints[0]!.shape!.line).toMatchObject({ hex: 'FFFFFF', widthPx: 1 });
     expect(s.dataLabels).toMatchObject({ showCategoryName: true, showValue: false, position: 'outEnd' });
-    expect(r.supportedProperties).toEqual(expect.arrayContaining(['series[0].data[1].sliced', 'series[0].data[0].color']));
+    expect(r.supportedProperties).toEqual(
+      expect.arrayContaining(['series[0].data[1].sliced', 'series[0].data[0].color']),
+    );
+  });
+
+  it('a hidden pie slice is still exported and reported as HIDDEN_POINT', () => {
+    const m = F.pieModel();
+    m.series[0]!.points[2]!.visible = false;
+    const { chart, d } = run(m);
+    expect(group(chart, 'pie').series[0]!.dataPoints.map((p) => p.idx)).toEqual([0, 1, 2, 3]);
+    const hidden = d.items.filter((x) => x.code === 'HIDDEN_POINT');
+    expect(hidden).toHaveLength(1);
+    expect(hidden[0]).toMatchObject({
+      code: 'HIDDEN_POINT',
+      outcome: 'approximated',
+      property: 'series[0].data[2].visible',
+      seriesIndex: 0,
+    });
+    expect(codes(run(F.pieModel()).d)).not.toContain('HIDDEN_POINT');
   });
 
   it('doughnut rings map points to the union rows', () => {
@@ -288,8 +371,17 @@ describe('translateChartModel: styling', () => {
   it('translates fonts, backgrounds, gridlines, legend, data labels and layout', () => {
     const { chart, d, r } = run(F.styledModel());
     expect(chart.title!.lines).toEqual(['Styled', 'Second line']);
-    expect(chart.title!.font).toEqual({ typeface: 'Open Sans', sizeHundredthsPt: 1500, bold: true, italic: false, colorHex: '112233' });
-    expect(d.items.find((x) => x.property === 'subtitle.text')).toMatchObject({ code: 'APPROXIMATED_LAYOUT', severity: 'info' });
+    expect(chart.title!.font).toEqual({
+      typeface: 'Open Sans',
+      sizeHundredthsPt: 1500,
+      bold: true,
+      italic: false,
+      colorHex: '112233',
+    });
+    expect(d.items.find((x) => x.property === 'subtitle.text')).toMatchObject({
+      code: 'APPROXIMATED_LAYOUT',
+      severity: 'info',
+    });
     expect(chart.chartArea.fill).toEqual({
       type: 'gradient',
       angle: 90,
@@ -315,11 +407,27 @@ describe('translateChartModel: styling', () => {
       font: expect.objectContaining({ bold: true, sizeHundredthsPt: 825 }),
       fill: { type: 'solid', hex: 'EEEEEE', alpha: 1 },
       line: expect.objectContaining({ hex: '999999', widthPx: 1 }),
+      deletedEntries: [],
     });
     const s = group(chart, 'bar').series[0]!;
-    expect(s.shape).toEqual({ fill: { type: 'solid', hex: 'FF0000', alpha: 1 }, line: expect.objectContaining({ hex: '000000', widthPx: 1 }) });
-    expect(s.dataPoints).toEqual([{ idx: 2, shape: { fill: { type: 'solid', hex: '00FF00', alpha: 1 }, line: null }, marker: null, explosion: null, dataLabels: null }]);
-    expect(s.dataLabels).toMatchObject({ position: 'outEnd', numberFormat: '0.0', font: expect.objectContaining({ bold: true }) });
+    expect(s.shape).toEqual({
+      fill: { type: 'solid', hex: 'FF0000', alpha: 1 },
+      line: expect.objectContaining({ hex: '000000', widthPx: 1 }),
+    });
+    expect(s.dataPoints).toEqual([
+      {
+        idx: 2,
+        shape: { fill: { type: 'solid', hex: '00FF00', alpha: 1 }, line: null },
+        marker: null,
+        explosion: null,
+        dataLabels: null,
+      },
+    ]);
+    expect(s.dataLabels).toMatchObject({
+      position: 'outEnd',
+      numberFormat: '0.0',
+      font: expect.objectContaining({ bold: true }),
+    });
     expect(r.supportedProperties).toEqual(
       expect.arrayContaining([
         'chart.type',
@@ -364,7 +472,14 @@ describe('translateChartModel: styling', () => {
     expect(chart.chartArea).toEqual({ fill: null, line: null });
     expect(chart.plotArea).toEqual({ fill: null, line: null, manualLayout: null });
     expect(chart.title).toEqual({ lines: ['Styled', 'Second line'], font: null, overlay: false });
-    expect(chart.legend).toEqual({ position: 'r', overlay: false, font: null, fill: null, line: null });
+    expect(chart.legend).toEqual({
+      position: 'r',
+      overlay: false,
+      font: null,
+      fill: null,
+      line: null,
+      deletedEntries: [],
+    });
     const s = group(chart, 'bar').series[0]!;
     expect(s.shape).toEqual({ fill: null, line: null });
     expect(s.marker).toBeNull();
@@ -412,11 +527,18 @@ describe('translateChartModel: data concerns', () => {
 
 describe('translateChartModel: sheet names', () => {
   it('sanitizes names and keeps them unique', () => {
-    const { r, d, chart } = run(F.lineModel(), { chartSheetName: 'My:Chart?', dataSheetName: 'mychart', takenSheetNames: new Set(['Other']) });
+    const { r, d, chart } = run(F.lineModel(), {
+      chartSheetName: 'My:Chart?',
+      dataSheetName: 'mychart',
+      takenSheetNames: new Set(['Other']),
+    });
     expect(r.chartSheetName).toBe('MyChart');
     expect(r.dataSheetName).toBe('mychart (2)');
     expect(r.sheets.map((s) => s.name)).toEqual(['MyChart', 'mychart (2)']);
-    expect(d.items.filter((x) => x.code === 'SHEET_NAME_ADJUSTED').map((x) => x.property)).toEqual(['chartSheetName', 'dataSheetName']);
+    expect(d.items.filter((x) => x.code === 'SHEET_NAME_ADJUSTED').map((x) => x.property)).toEqual([
+      'chartSheetName',
+      'dataSheetName',
+    ]);
     expect(group(chart, 'line').series[0]!.values.formula).toBe("'mychart (2)'!$B$2:$B$5");
   });
 
@@ -432,6 +554,7 @@ describe('translateChartModel: blocking', () => {
     ['unknownTypeModel', 'UNSUPPORTED_CHART_TYPE'],
     ['emptyModel', 'EMPTY_CHART'],
   ] as const)('%s is blocking with %s', (name, code) => {
+    // biome-ignore lint/performance/noDynamicNamespaceImportAccess: the table names fixtures by key
     const { r, d } = run(F[name]());
     expect(r.blocking).toBe(true);
     expect(r.sheets).toEqual([]);
@@ -445,5 +568,161 @@ describe('translateChartModel: blocking', () => {
     const m = F.comboModel();
     m.series.push(F.series({ kind: 'pie', index: 2, points: [F.point({ name: 'a', y: 1 })] }));
     expect(run(m).r.blocking).toBe(true);
+  });
+});
+
+describe('translateChartModel: audit fixes', () => {
+  it('C0: legend.deletedEntries lists the idx of series hidden from the legend', () => {
+    const m = F.multiSeriesLineModel();
+    m.series[1] = { ...m.series[1]!, showInLegend: false };
+    const { chart } = run(m);
+    expect(chart.legend!.deletedEntries).toEqual([1]);
+    expect(run(F.lineModel()).chart.legend!.deletedEntries).toEqual([]);
+  });
+
+  it('C1: unaligned x values become #N/A cells and null cache entries; the diagnostic says so', () => {
+    const m = F.baseModel();
+    m.xAxes = [F.axis({ index: 0, kind: 'linear' })];
+    m.series = [
+      F.series({ kind: 'line', index: 0, points: [0, 2, 4, 6].map((x) => F.point({ x, y: x })) }),
+      F.series({ kind: 'line', index: 1, points: [1, 3, 5].map((x) => F.point({ x, y: x })) }),
+    ];
+    const { r, chart, d } = run(m);
+    const data = r.sheets[1]!;
+    const b3 = data.rows.find((row) => row.row0 === 2)!.cells.find((c) => c.col0 === 1)!;
+    expect(b3.value).toEqual({ type: 'error', value: '#N/A' });
+    expect(chart.dispBlanksAs).toBe('gap');
+    expect(group(chart, 'line').series[0]!.values.cache).toEqual([0, null, 2, null, 4, null, 6]);
+    expect(d.items.find((x) => x.code === 'UNALIGNED_X_VALUES')!.message).toContain(
+      'written as #N/A so lines stay connected',
+    );
+  });
+
+  it('C4: stacked + unstacked columns become one bar group', () => {
+    const m = F.baseModel();
+    m.series = [
+      F.series({ kind: 'column', index: 0, stacking: 'normal', points: F.pts([1, 2, 3, 4]) }),
+      F.series({ kind: 'column', index: 1, points: F.pts([1, 2, 3, 4]) }),
+    ];
+    const { chart, d } = run(m);
+    expect(chart.plotGroups).toHaveLength(1);
+    expect(chart.plotGroups[0]).toMatchObject({ kind: 'bar', grouping: 'stacked', overlap: 100 });
+    expect(d.items.find((x) => x.code === 'APPROXIMATED_CHART_TYPE')).toMatchObject({
+      property: 'series[1].stacking',
+      severity: 'warning',
+    });
+  });
+
+  it('C5: percentage-only labels on a non-pie chart show values instead', () => {
+    const m = F.baseModel();
+    m.series = [0, 1].map((i) =>
+      F.series({
+        kind: 'column',
+        index: i,
+        stacking: 'percent',
+        points: F.pts([1, 2, 3, 4]),
+        dataLabels: F.labels({ showValue: false, showPercentage: true, format: { kind: 'excel', code: '0%' } }),
+      }),
+    );
+    const { chart, d } = run(m);
+    const dl = group(chart, 'bar').series[0]!.dataLabels!;
+    expect(dl).toMatchObject({ showValue: true, showPercent: false, numberFormat: null });
+    const diag = d.items.find((x) => x.code === 'APPROXIMATED_DATA_LABELS' && x.seriesIndex === 0)!;
+    expect(diag.message).toBe('Excel shows percentages only on pie charts; values are shown instead.');
+    // Pie keeps percentages.
+    const pie = F.pieModel();
+    pie.series[0] = { ...pie.series[0]!, dataLabels: F.labels({ showValue: false, showPercentage: true }) };
+    expect(group(run(pie).chart, 'pie').series[0]!.dataLabels).toMatchObject({ showValue: false, showPercent: true });
+  });
+
+  it('C7: bar gap width and overlap reproduce the Highcharts bar width', () => {
+    const geom = (n: number, gp = 0.2, pp = 0.1) => {
+      const m = F.baseModel();
+      m.series = Array.from({ length: n }, (_, i) =>
+        F.series({
+          kind: 'column',
+          index: i,
+          points: F.pts([1, 2, 3, 4]),
+          bars: { pointPadding: pp, groupPadding: gp, borderRadius: 0 },
+        }),
+      );
+      const g = group(run(m).chart, 'bar');
+      return { gapWidth: g.gapWidth ?? 0, overlap: g.overlap ?? 0 };
+    };
+    expect(geom(2)).toEqual({ gapWidth: 192, overlap: -25 });
+    expect(geom(1)).toEqual({ gapWidth: 108, overlap: -25 });
+    expect(geom(3)).toEqual({ gapWidth: 275, overlap: -25 });
+    expect(geom(2, 0.1, 0)).toEqual({ gapWidth: 50, overlap: 0 });
+    expect(geom(1, 0.1, 0)).toEqual({ gapWidth: 25, overlap: 0 });
+    expect(geom(6).gapWidth).toBe(500); // clamped
+    for (const n of [1, 2, 3]) {
+      const { gapWidth, overlap } = geom(n);
+      const excelBar = 1 / (n + (n - 1) * (-overlap / 100) + gapWidth / 100);
+      const highchartsBar = ((1 - 0.4) / n) * (1 - 0.2);
+      expect(Math.abs(excelBar - highchartsBar)).toBeLessThan(0.002);
+    }
+  });
+
+  it('C10: manual layout keeps the plot area inside the chart', () => {
+    const m = F.lineModel();
+    m.width = 600;
+    m.height = 400;
+    m.plotArea = { ...m.plotArea, box: { left: 300, top: 50, width: 500, height: 300 } };
+    const ml = run(m).chart.plotArea.manualLayout!;
+    expect(ml).toEqual({ x: 0.5, y: 0.125, w: 0.5, h: 0.75 });
+    expect(ml.x + ml.w).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('translateChartModel: OOXML strictness (W1, W2)', () => {
+  const pairs = (chart: ExcelChartSpec) =>
+    new Set(chart.plotGroups.map((g) => ('axisIds' in g ? g.axisIds.join('/') : ''))).size;
+
+  it('W1: column (y0) + line (y1) + scatter → scatter dropped, two axis groups', () => {
+    const m = F.baseModel();
+    m.yAxes = [F.axis({ index: 0, kind: 'linear' }), F.axis({ index: 1, kind: 'linear', opposite: true })];
+    m.series = [
+      F.series({ kind: 'column', index: 0, points: F.pts([1, 2, 3, 4]) }),
+      F.series({ kind: 'line', index: 1, yAxisIndex: 1, points: F.pts([4, 3, 2, 1]) }),
+      F.series({ kind: 'scatter', index: 2, points: F.pts([2, 2, 2, 2]) }),
+    ];
+    const { r, chart, d } = run(m);
+    expect(chart.plotGroups.map((g) => g.kind)).toEqual(['bar', 'line']);
+    expect(pairs(chart)).toBe(2);
+    expect(chart.axes.map((a) => a.id).sort()).toEqual([1000, 1001, 2000, 2001]);
+    expect(r.resolution.droppedSeries).toContain(2);
+    expect(d.items.find((x) => x.code === 'UNSUPPORTED_SERIES_TYPE')).toMatchObject({
+      outcome: 'unsupported',
+      severity: 'warning',
+      property: 'series[2].type',
+      message: 'Excel allows two axis groups; scatter series dropped.',
+    });
+  });
+
+  it('W1: column + scatter keeps the scatter on the free second axis group', () => {
+    const m = F.baseModel();
+    m.series = [
+      F.series({ kind: 'column', index: 0, points: F.pts([1, 2, 3, 4]) }),
+      F.series({ kind: 'scatter', index: 1, points: F.pts([4, 3, 2, 1]) }),
+    ];
+    const { chart } = run(m);
+    expect(chart.plotGroups.map((g) => g.kind)).toEqual(['bar', 'scatter']);
+    expect(pairs(chart)).toBe(2);
+  });
+
+  it('W2: series beyond 255 per chart are dropped with WRITER_LIMITATION', () => {
+    const m = F.baseModel();
+    m.series = Array.from({ length: 258 }, (_, i) =>
+      F.series({ kind: i % 2 ? 'line' : 'column', index: i, points: F.pts([1, 2, 3, 4]) }),
+    );
+    const { r, chart, d } = run(m);
+    expect(chart.plotGroups.reduce((n, g) => n + g.series.length, 0)).toBe(255);
+    // Drawing order is group by group (columns 0,2,…,256 then lines 1,3,…): the last three lines go.
+    expect(r.resolution.droppedSeries).toEqual([253, 255, 257]);
+    expect(d.items.find((x) => x.code === 'WRITER_LIMITATION')).toMatchObject({
+      outcome: 'unsupported',
+      severity: 'warning',
+      details: { dropped: 3, limit: 255 },
+    });
   });
 });

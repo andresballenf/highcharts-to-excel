@@ -133,7 +133,17 @@ export const demoCharts: DemoChart[] = [
           },
         },
         buttons: {
-          contextButton: { menuItems: ['viewFullscreen', 'printChart', 'separator', 'downloadPNG', 'downloadSVG', 'separator', 'myCustomItem'] },
+          contextButton: {
+            menuItems: [
+              'viewFullscreen',
+              'printChart',
+              'separator',
+              'downloadPNG',
+              'downloadSVG',
+              'separator',
+              'myCustomItem',
+            ],
+          },
         },
       },
     },
@@ -168,8 +178,25 @@ export const demoCharts: DemoChart[] = [
       xAxis: { title: { text: 'Height (cm)' } },
       yAxis: { title: { text: 'Weight (kg)' } },
       series: [
-        { type: 'scatter', name: 'Female', data: [[161.2, 51.6], [167.5, 59.0], [159.5, 49.2], [157.0, 63.0]] },
-        { type: 'scatter', name: 'Male', data: [[174.0, 65.6], [175.3, 71.8], [193.5, 80.7]] },
+        {
+          type: 'scatter',
+          name: 'Female',
+          data: [
+            [161.2, 51.6],
+            [167.5, 59.0],
+            [159.5, 49.2],
+            [157.0, 63.0],
+          ],
+        },
+        {
+          type: 'scatter',
+          name: 'Male',
+          data: [
+            [174.0, 65.6],
+            [175.3, 71.8],
+            [193.5, 80.7],
+          ],
+        },
       ],
     },
   },

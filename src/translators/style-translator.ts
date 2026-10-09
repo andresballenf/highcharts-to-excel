@@ -77,16 +77,28 @@ export function markerSymbolToOoxml(
     case 'triangle-down':
       return {
         symbol: 'triangle',
-        diagnostic: createDiagnostic('APPROXIMATED_MARKER', 'approximated', property, 'Excel has no downward triangle marker; an upward triangle is used.', {
-          details: { symbol },
-        }),
+        diagnostic: createDiagnostic(
+          'APPROXIMATED_MARKER',
+          'approximated',
+          property,
+          'Excel has no downward triangle marker; an upward triangle is used.',
+          {
+            details: { symbol },
+          },
+        ),
       };
     default:
       return {
         symbol: 'circle',
-        diagnostic: createDiagnostic('APPROXIMATED_MARKER', 'approximated', property, 'Custom/image marker symbols are replaced by circles.', {
-          details: { symbol },
-        }),
+        diagnostic: createDiagnostic(
+          'APPROXIMATED_MARKER',
+          'approximated',
+          property,
+          'Custom/image marker symbols are replaced by circles.',
+          {
+            details: { symbol },
+          },
+        ),
       };
   }
 }
@@ -110,10 +122,14 @@ export function strokeFromOptions(
     opts.color !== undefined && opts.color !== null ? fillToSolidColor(toFill(opts.color, resolveVariable).fill) : null;
   let width: number | undefined;
   if (typeof opts.width === 'number' && Number.isFinite(opts.width) && opts.width >= 0) width = opts.width;
-  else if (typeof opts.width === 'string' && /^\s*\d*\.?\d+\s*(px)?\s*$/i.test(opts.width)) width = parseFloat(opts.width);
+  else if (typeof opts.width === 'string' && /^\s*\d*\.?\d+\s*(px)?\s*$/i.test(opts.width))
+    width = parseFloat(opts.width);
   return {
     color: color ?? fallback.color ?? null,
     width: width ?? fallback.width ?? 1,
-    dash: opts.dashStyle !== undefined && opts.dashStyle !== null ? dashStyleFromHighcharts(opts.dashStyle) : (fallback.dash ?? 'solid'),
+    dash:
+      opts.dashStyle !== undefined && opts.dashStyle !== null
+        ? dashStyleFromHighcharts(opts.dashStyle)
+        : (fallback.dash ?? 'solid'),
   };
 }

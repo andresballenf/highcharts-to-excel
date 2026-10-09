@@ -20,6 +20,18 @@ describe('Excel serial dates', () => {
     expect(msToExcelSerial(Date.UTC(2024, 0, 1, 12))).toBe(45292.5);
     expect(msToExcelSerial(Date.UTC(2024, 0, 1, 8))).toBe(45292.333333333);
   });
+  it('C6: applies the Excel 1900 leap-year bug before 1900-03-01', () => {
+    expect(msToExcelSerial(Date.UTC(1900, 0, 1))).toBe(1);
+    expect(msToExcelSerial(Date.UTC(1900, 1, 28))).toBe(59);
+    expect(msToExcelSerial(Date.UTC(1900, 1, 28, 12))).toBe(59.5);
+    expect(msToExcelSerial(Date.UTC(1900, 2, 1))).toBe(61);
+    expect(msToExcelSerial(Date.UTC(1899, 11, 31))).toBe(0);
+    // Not representable as an Excel date: raw negative serial (callers fall back to text).
+    expect(msToExcelSerial(Date.UTC(1899, 11, 1))).toBeLessThan(0);
+    for (const ms of [Date.UTC(1900, 0, 1), Date.UTC(1900, 1, 28, 6), Date.UTC(1900, 2, 1)]) {
+      expect(excelSerialToMs(msToExcelSerial(ms))).toBe(ms);
+    }
+  });
   it('round-trips', () => {
     const ms = Date.UTC(2023, 6, 15, 13, 45, 30, 250);
     expect(excelSerialToMs(msToExcelSerial(ms))).toBe(ms);
@@ -47,6 +59,16 @@ describe('highchartsDateFormatToExcel', () => {
     expect(code('Week of %b %e')).toBe('"Week" "of" mmm d');
     expect(code('%Y年')).toBe('yyyy"年"');
     expect(code('%d%%')).toBe('dd"%"');
+  });
+  it('C11: %M is minutes only after an hour token or before seconds', () => {
+    expect(highchartsDateFormatToExcel('%M min')).toMatchObject({ kind: 'unsupported', source: '%M min' });
+    expect(highchartsDateFormatToExcel('%M')).toMatchObject({ kind: 'unsupported' });
+    expect(code('%M:%S')).toBe('mm:ss');
+    expect(code('%H:%M')).toBe('hh:mm');
+    expect(code('%b %Y %H:%M')).toBe('mmm yyyy hh:mm');
+  });
+  it('W5: rejects date formats whose Excel code exceeds 255 characters', () => {
+    expect(highchartsDateFormatToExcel(`%Y ${'w'.repeat(300)}`)).toMatchObject({ kind: 'unsupported' });
   });
   it('rejects unsupported tokens', () => {
     for (const f of ['%j', '%w', '%u', '%U', 'Week %W']) {

@@ -15,7 +15,9 @@ function cell(sheet: SheetSpec, col0: number, row0: number): CellValue | undefin
 }
 
 function headerRow(sheet: SheetSpec): string[] {
-  return (sheet.rows.find((r) => r.row0 === 0)?.cells ?? []).map((c) => (c.value.type === 'string' ? c.value.value : '?'));
+  return (sheet.rows.find((r) => r.row0 === 0)?.cells ?? []).map((c) =>
+    c.value.type === 'string' ? c.value.value : '?',
+  );
 }
 
 describe('category layout', () => {
@@ -48,8 +50,9 @@ describe('category layout', () => {
     expect(l.ranges[0]!.categories).toMatchObject({ kind: 'num', cache: [1, 2, 3, 4] });
     expect(l.ranges[0]!.values.cache).toEqual([10, 11, null, 12]);
     expect(l.ranges[1]!.values.cache).toEqual([null, 20, 21, 22]);
-    expect(cell(l.sheet, 1, 3)).toBeUndefined();
-    expect(cell(l.sheet, 2, 1)).toBeUndefined();
+    // Alignment gaps (no point at that x) are #N/A cells so Excel lines stay connected.
+    expect(cell(l.sheet, 1, 3)).toEqual({ type: 'error', value: '#N/A' });
+    expect(cell(l.sheet, 2, 1)).toEqual({ type: 'error', value: '#N/A' });
     const unaligned = l.diagnostics.filter((d) => d.code === 'UNALIGNED_X_VALUES');
     expect(unaligned.map((d) => [d.seriesIndex, d.outcome, d.severity])).toEqual([
       [0, 'approximated', 'info'],
@@ -62,7 +65,12 @@ describe('category layout', () => {
     m.xAxes = [F.axis({ index: 0, kind: 'category' })];
     m.series = [
       F.series({ kind: 'line', index: 0, name: 'A', points: ['x', 'y'].map((name, i) => F.point({ name, y: i })) }),
-      F.series({ kind: 'line', index: 1, name: 'B', points: ['y', 'z'].map((name, i) => F.point({ name, y: 10 + i })) }),
+      F.series({
+        kind: 'line',
+        index: 1,
+        name: 'B',
+        points: ['y', 'z'].map((name, i) => F.point({ name, y: 10 + i })),
+      }),
     ];
     const l = layoutOf(m);
     expect(l.ranges[0]!.categories!.cache).toEqual(['x', 'y', 'z']);
@@ -107,7 +115,10 @@ describe('category layout', () => {
   it('reports hidden series that reach the layout', () => {
     const l = layoutOf(F.hiddenSeriesModel());
     expect(headerRow(l.sheet)).toEqual(['Category', 'Shown', 'Hidden']);
-    expect(l.diagnostics.find((d) => d.code === 'HIDDEN_SERIES_INCLUDED')).toMatchObject({ seriesIndex: 1, property: 'series[1].visible' });
+    expect(l.diagnostics.find((d) => d.code === 'HIDDEN_SERIES_INCLUDED')).toMatchObject({
+      seriesIndex: 1,
+      property: 'series[1].visible',
+    });
   });
 
   it('sizes columns between 10 and 40 characters', () => {
@@ -125,7 +136,11 @@ describe('pie / doughnut layout', () => {
   it('writes point names and values', () => {
     const l = layoutOf(F.pieModel());
     expect(headerRow(l.sheet)).toEqual(['Category', 'Share']);
-    expect(l.ranges[0]!.categories).toEqual({ formula: 'Data!$A$2:$A$5', kind: 'str', cache: ['Chrome', 'Edge', 'Firefox', 'Safari'] });
+    expect(l.ranges[0]!.categories).toEqual({
+      formula: 'Data!$A$2:$A$5',
+      kind: 'str',
+      cache: ['Chrome', 'Edge', 'Firefox', 'Safari'],
+    });
     expect(l.ranges[0]!.values.cache).toEqual([60, 15, 15, 10]);
   });
 
@@ -168,9 +183,16 @@ describe('scatter / bubble layout', () => {
   it('converts datetime scatter x values to serials', () => {
     const m = F.scatterModel();
     m.xAxes = [F.axis({ index: 0, kind: 'datetime' })];
-    m.series = [F.series({ kind: 'scatter', index: 0, name: 'S', points: [F.point({ x: Date.UTC(2024, 0, 1), y: 1 })] })];
+    m.series = [
+      F.series({ kind: 'scatter', index: 0, name: 'S', points: [F.point({ x: Date.UTC(2024, 0, 1), y: 1 })] }),
+    ];
     const l = layoutOf(m, 'Data', () => 'dd/mm/yyyy');
-    expect(l.ranges[0]!.categories).toEqual({ formula: 'Data!$A$2:$A$2', kind: 'num', cache: [45292], formatCode: 'dd/mm/yyyy' });
+    expect(l.ranges[0]!.categories).toEqual({
+      formula: 'Data!$A$2:$A$2',
+      kind: 'num',
+      cache: [45292],
+      formatCode: 'dd/mm/yyyy',
+    });
   });
 
   it('puts scatter blocks to the right of the shared category columns in a combo', () => {
@@ -217,7 +239,12 @@ describe('limits', () => {
     const r = checkLimits(40_000, 2, 40_000, 3);
     expect(r.blocking).toBe(false);
     expect(r.diagnostics).toEqual([
-      expect.objectContaining({ code: 'ROW_LIMIT_EXCEEDED', outcome: 'approximated', seriesIndex: 3, property: 'series[3].data' }),
+      expect.objectContaining({
+        code: 'ROW_LIMIT_EXCEEDED',
+        outcome: 'approximated',
+        seriesIndex: 3,
+        property: 'series[3].data',
+      }),
     ]);
     expect(r.diagnostics[0]!.message).toContain('32,000');
   });
@@ -228,6 +255,175 @@ describe('limits', () => {
     expect(l.rowCount).toBe(40_000);
     expect(l.ranges[0]!.values.formula).toBe('Data!$B$2:$B$40001');
     expect(l.ranges[0]!.values.cache).toHaveLength(40_000);
-    expect(l.diagnostics.find((d) => d.code === 'ROW_LIMIT_EXCEEDED')).toMatchObject({ outcome: 'approximated', seriesIndex: 0 });
+    expect(l.diagnostics.find((d) => d.code === 'ROW_LIMIT_EXCEEDED')).toMatchObject({
+      outcome: 'approximated',
+      seriesIndex: 0,
+    });
+  });
+});
+
+describe('audit fixes: alignment, label mode, duplicates, pre-1900 dates, doughnut rings', () => {
+  const NA: CellValue = { type: 'error', value: '#N/A' };
+
+  it('C1: unaligned x → #N/A cells (null in the chart cache); a real null stays blank', () => {
+    const m = F.baseModel();
+    m.xAxes = [F.axis({ index: 0, kind: 'linear' })];
+    m.series = [
+      F.series({
+        kind: 'line',
+        index: 0,
+        points: [0, 2, 4, 6].map((x) => F.point({ x, y: x === 4 ? null : x, isNull: x === 4 })),
+      }),
+      F.series({ kind: 'line', index: 1, points: [1, 3, 5].map((x) => F.point({ x, y: x })) }),
+    ];
+    const l = layoutOf(m);
+    expect(l.x.keys).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(cell(l.sheet, 1, 2)).toEqual(NA); // B3: series 0 has no point at x=1
+    expect(cell(l.sheet, 1, 5)).toBeUndefined(); // B6: real null at x=4 stays blank (gap)
+    expect(cell(l.sheet, 2, 1)).toEqual(NA); // C2: series 1 has no point at x=0
+    expect(l.ranges[0]!.values.cache).toEqual([0, null, 2, null, null, null, 6]);
+    expect(l.ranges[1]!.values.cache).toEqual([null, 1, null, 3, null, 5, null]);
+    const d = l.diagnostics.find((x) => x.code === 'UNALIGNED_X_VALUES' && x.seriesIndex === 0)!;
+    expect(d.message).toContain('written as #N/A so lines stay connected');
+    expect(l.diagnostics.find((x) => x.code === 'NULL_VALUES')!.message).toContain('empty cells');
+  });
+
+  it('C2: label mode never maps a numeric x onto a category by array position', () => {
+    const m = F.baseModel();
+    m.xAxes = [F.axis({ index: 0, kind: 'category', categories: ['A', 'B', 'C'] })];
+    m.series = [
+      F.series({ kind: 'line', index: 0, points: [0, 1, 2].map((x) => F.point({ x, y: 10 + x })) }),
+      F.series({
+        kind: 'line',
+        index: 1,
+        points: [F.point({ x: -1, y: 99 }), F.point({ x: 0.5, y: 77 }), F.point({ x: 2, y: 55 })],
+      }),
+    ];
+    const l = layoutOf(m);
+    expect(l.x.keys).toEqual(['A', 'B', 'C', '-1', '0.5']);
+    expect(l.ranges[1]!.values.cache).toEqual([null, null, 55, 99, 77]);
+    expect(l.ranges[0]!.values.cache).toEqual([10, 11, 12, null, null]);
+    const d = l.diagnostics.find(
+      (x) => x.code === 'UNALIGNED_X_VALUES' && x.seriesIndex === 1 && x.severity === 'warning',
+    )!;
+    expect(d).toMatchObject({ outcome: 'approximated', severity: 'warning' });
+    expect(d.message).toContain('-1');
+    expect(d.message).toContain('0.5');
+  });
+
+  it('C2: x beyond the categories becomes its own row', () => {
+    const m = F.baseModel();
+    m.xAxes = [F.axis({ index: 0, kind: 'category', categories: ['A', 'B'] })];
+    m.series = [
+      F.series({
+        kind: 'column',
+        index: 0,
+        points: [F.point({ x: 0, y: 1 }), F.point({ x: 1, y: 2 }), F.point({ x: 3, y: 4 })],
+      }),
+      F.series({ kind: 'column', index: 1, points: [F.point({ x: 0.5, y: 5 })] }),
+    ];
+    const l = layoutOf(m);
+    expect(l.x.keys).toEqual(['A', 'B', '3', '0.5']);
+    expect(l.ranges[0]!.values.cache).toEqual([1, 2, 4, null]);
+    expect(l.ranges[1]!.values.cache).toEqual([null, null, null, 5]);
+  });
+
+  it('C3: duplicate x within one series keeps the first value and is reported', () => {
+    const m = F.baseModel();
+    m.series = [
+      F.series({
+        kind: 'line',
+        index: 0,
+        points: [F.point({ x: 0, y: 1 }), F.point({ x: 0, y: 2 }), F.point({ x: 1, y: 3 })],
+      }),
+    ];
+    const l = layoutOf(m);
+    expect(l.ranges[0]!.values.cache).toEqual([1, 3]);
+    expect(l.ranges[0]!.pointOffsets).toEqual([0, -1, 1]);
+    const d = l.diagnostics.find((x) => x.code === 'UNALIGNED_X_VALUES' && x.details?.duplicates !== undefined)!;
+    expect(d).toMatchObject({
+      outcome: 'approximated',
+      severity: 'warning',
+      seriesIndex: 0,
+      property: 'series[0].data[1]',
+      details: { duplicates: 1 },
+    });
+  });
+
+  it('C6: datetime x before 1899-12-31 falls back to ISO date category strings', () => {
+    const m = F.baseModel();
+    m.xAxes = [F.axis({ index: 0, kind: 'datetime' })];
+    m.series = [
+      F.series({
+        kind: 'line',
+        index: 0,
+        points: [Date.UTC(1899, 0, 1), Date.UTC(1900, 0, 1), Date.UTC(1900, 1, 28), Date.UTC(1900, 2, 1)].map((x, i) =>
+          F.point({ x, y: i }),
+        ),
+      }),
+    ];
+    const l = layoutOf(m);
+    expect(l.x.kind).toBe('category');
+    expect(cell(l.sheet, 0, 1)).toEqual({ type: 'string', value: '1899-01-01' });
+    expect(l.ranges[0]!.categories).toMatchObject({
+      kind: 'str',
+      cache: ['1899-01-01', '1900-01-01', '1900-02-28', '1900-03-01'],
+    });
+    expect(l.diagnostics.find((x) => x.code === 'APPROXIMATED_DATETIME')).toMatchObject({
+      outcome: 'approximated',
+      severity: 'warning',
+    });
+  });
+
+  it('C6: 1900 dates after the epoch keep Excel serials (leap-year bug applied)', () => {
+    const m = F.baseModel();
+    m.xAxes = [F.axis({ index: 0, kind: 'datetime' })];
+    m.series = [
+      F.series({
+        kind: 'line',
+        index: 0,
+        points: [Date.UTC(1900, 0, 1), Date.UTC(1900, 1, 28), Date.UTC(1900, 2, 1)].map((x, i) => F.point({ x, y: i })),
+      }),
+    ];
+    const l = layoutOf(m);
+    expect(l.x.kind).toBe('datetime');
+    expect(l.ranges[0]!.categories!.cache).toEqual([1, 59, 61]);
+    expect(l.diagnostics.some((x) => x.code === 'APPROXIMATED_DATETIME')).toBe(false);
+  });
+
+  it('C6: pre-1900 datetime scatter keeps day numbers (no date format) on a value axis', () => {
+    const m = F.baseModel();
+    m.xAxes = [F.axis({ index: 0, kind: 'datetime' })];
+    m.series = [
+      F.series({
+        kind: 'scatter',
+        index: 0,
+        points: [Date.UTC(1899, 11, 30), Date.UTC(1900, 0, 1)].map((x, i) => F.point({ x, y: i })),
+      }),
+    ];
+    const l = layoutOf(m);
+    expect(l.x.kind).toBe('linear');
+    expect(cell(l.sheet, 0, 1)).toEqual({ type: 'number', value: -1 });
+    expect(l.ranges[0]!.categories).toEqual({ formula: 'Data!$A$2:$A$3', kind: 'num', cache: [-1, 1] });
+  });
+
+  it('C9: doughnut rings with different key sets are reported', () => {
+    const m = F.baseModel();
+    m.xAxes = [];
+    m.yAxes = [];
+    m.series = [
+      F.series({ kind: 'doughnut', index: 0, points: [F.point({ name: 'A', y: 1 }), F.point({ name: 'B', y: 2 })] }),
+      F.series({
+        kind: 'doughnut',
+        index: 1,
+        points: [F.point({ name: 'B1', y: 1 }), F.point({ name: 'A', y: 5 }), F.point({ name: 'C', y: 2 })],
+      }),
+    ];
+    const l = layoutOf(m);
+    expect(l.ranges[0]!.categories!.cache).toEqual(['A', 'B', 'B1', 'C']);
+    const d = l.diagnostics.find((x) => x.code === 'APPROXIMATED_LAYOUT')!;
+    expect(d).toMatchObject({ outcome: 'approximated', severity: 'warning', property: 'series[1].data' });
+    expect(d.message).toContain('union');
+    expect(layoutOf(F.doughnutModel()).diagnostics.some((x) => x.code === 'APPROXIMATED_LAYOUT')).toBe(true);
   });
 });

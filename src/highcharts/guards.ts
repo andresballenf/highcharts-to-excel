@@ -114,18 +114,23 @@ function isWrapperLike(x: Rec): boolean {
   return proto !== Object.prototype && proto !== null;
 }
 
-/** Strips HTML tags and decodes the handful of entities Highcharts text commonly contains. */
+/**
+ * Strips HTML tags and decodes the handful of entities Highcharts text commonly contains.
+ * Only real tags (`<b>`, `</span>`, `<br/>`…) are removed, so literal comparisons such as
+ * "Growth < 5% vs > 3% target" survive; `<br>` variants become line breaks.
+ */
 export function plainText(x: unknown): string | null {
   if (typeof x !== 'string' && typeof x !== 'number') return null;
   const s = String(x)
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<[^>]*>/g, '')
+    .replace(/<br\b[^>]*>/gi, '\n')
+    .replace(/<\/?[a-zA-Z][^>]*>/g, '')
     .replace(/&nbsp;/g, ' ')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, '&')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
     .trim();
   return s === '' ? null : s;
 }

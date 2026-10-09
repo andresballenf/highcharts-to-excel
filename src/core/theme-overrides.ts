@@ -2,7 +2,16 @@
  * Applies explicit ThemeOverrides to a ChartModel (returns a new model; the input is not mutated).
  */
 
-import type { AxisModel, Color, DataLabelStyle, Font, PointModel, SeriesModel, Stroke, TextBlock } from '../types/chart-model';
+import type {
+  AxisModel,
+  Color,
+  DataLabelStyle,
+  Font,
+  PointModel,
+  SeriesModel,
+  Stroke,
+  TextBlock,
+} from '../types/chart-model';
 import { createDiagnostic, type Diagnostic } from '../types/diagnostics';
 import type { ChartModel } from '../types/chart-model';
 import type { FontOverride, ThemeOverrides } from '../types/public-api';
@@ -28,14 +37,25 @@ export function applyThemeOverrides(model: ChartModel, overrides: ThemeOverrides
     const c = parseColor(value);
     if (!c) {
       warnings.push(
-        createDiagnostic('UNRESOLVED_COLOR', 'approximated', property, `Theme override color "${value}" could not be parsed and is ignored.`, {
-          details: { value },
-        }),
+        createDiagnostic(
+          'UNRESOLVED_COLOR',
+          'approximated',
+          property,
+          `Theme override color "${value}" could not be parsed and is ignored.`,
+          {
+            details: { value },
+          },
+        ),
       );
     }
     return c;
   };
-  const mergeFont = (base: Font | null, o: FontOverride | undefined, property: string, create: boolean): Font | null => {
+  const mergeFont = (
+    base: Font | null,
+    o: FontOverride | undefined,
+    property: string,
+    create: boolean,
+  ): Font | null => {
     const family = overrides.fontFamily;
     if (!o && family === undefined) return base;
     if (!base && !create && !o) return base;
@@ -64,7 +84,9 @@ export function applyThemeOverrides(model: ChartModel, overrides: ThemeOverrides
   // Palette.
   let palette: Color[] | null = null;
   if (overrides.colors && overrides.colors.length > 0) {
-    palette = overrides.colors.map((c, i) => color(c, `themeOverrides.colors[${i}]`)).filter((c): c is Color => c !== null);
+    palette = overrides.colors
+      .map((c, i) => color(c, `themeOverrides.colors[${i}]`))
+      .filter((c): c is Color => c !== null);
     if (palette.length > 0) next.colors = palette;
     else palette = null;
   }
@@ -79,11 +101,17 @@ export function applyThemeOverrides(model: ChartModel, overrides: ThemeOverrides
   // Titles and legend.
   next.title = mergeText(model.title, overrides.title, 'themeOverrides.title');
   next.subtitle = mergeText(model.subtitle, overrides.subtitle, 'themeOverrides.subtitle');
-  next.legend = { ...model.legend, font: mergeFont(model.legend.font, overrides.legend, 'themeOverrides.legend', true) };
+  next.legend = {
+    ...model.legend,
+    font: mergeFont(model.legend.font, overrides.legend, 'themeOverrides.legend', true),
+  };
 
   // Axes.
   const gridColor = color(overrides.gridLineColor, 'themeOverrides.gridLineColor');
-  const gridWidth = overrides.gridLineWidth !== undefined && Number.isFinite(overrides.gridLineWidth) && overrides.gridLineWidth >= 0 ? overrides.gridLineWidth : null;
+  const gridWidth =
+    overrides.gridLineWidth !== undefined && Number.isFinite(overrides.gridLineWidth) && overrides.gridLineWidth >= 0
+      ? overrides.gridLineWidth
+      : null;
   const mapAxis = (a: AxisModel, isY: boolean): AxisModel => {
     const out: AxisModel = {
       ...a,
@@ -132,14 +160,18 @@ export function applyThemeOverrides(model: ChartModel, overrides: ThemeOverrides
         if (c) out = recolor(out, c);
       }
       if (so.lineWidth !== undefined && Number.isFinite(so.lineWidth) && so.lineWidth >= 0) {
-        out.line = out.line ? { ...out.line, width: so.lineWidth } : { color: out.color, width: so.lineWidth, dash: 'solid' };
+        out.line = out.line
+          ? { ...out.line, width: so.lineWidth }
+          : { color: out.color, width: so.lineWidth, dash: 'solid' };
       }
       if (so.fillOpacity !== undefined && Number.isFinite(so.fillOpacity)) {
         out.fillOpacity = Math.min(1, Math.max(0, so.fillOpacity));
       }
     }
     if (overrides.dataLabels || overrides.fontFamily !== undefined) {
-      out.points = out.points.map((p) => (p.dataLabels ? { ...p, dataLabels: mapLabels(p.dataLabels, 'themeOverrides.dataLabels') } : p));
+      out.points = out.points.map((p) =>
+        p.dataLabels ? { ...p, dataLabels: mapLabels(p.dataLabels, 'themeOverrides.dataLabels') } : p,
+      );
     }
     return out;
   });
@@ -150,7 +182,8 @@ export function applyThemeOverrides(model: ChartModel, overrides: ThemeOverrides
 /** New series with its color (and the fill/line/marker colors derived from it) replaced. */
 function recolor(s: SeriesModel, c: Color): SeriesModel {
   const old = s.color;
-  const same = (x: Color | null): boolean => x === null || (old !== null && x.r === old.r && x.g === old.g && x.b === old.b);
+  const same = (x: Color | null): boolean =>
+    x === null || (old !== null && x.r === old.r && x.g === old.g && x.b === old.b);
   const out: SeriesModel = { ...s, color: c };
   if (!s.fill || s.fill.type === 'solid') out.fill = { type: 'solid', color: { ...c } };
   if (s.line) out.line = { ...s.line, color: same(s.line.color) ? c : s.line.color };

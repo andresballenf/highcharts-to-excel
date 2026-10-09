@@ -13,6 +13,7 @@ import {
   analyzeChartCompatibility,
   downloadHighchartsAsXlsx,
   exportChartsToWorkbook,
+  exportHighchartsToXlsx,
   installHighchartsExcelExport,
   triggerDownload,
   type CompatibilityReport,
@@ -30,15 +31,35 @@ export interface DemoResult {
   timings?: ExportTimings;
 }
 
+/** Test hooks read by the e2e tests (e2e/export.spec.ts). */
+export interface DemoHandle {
+  charts: Record<string, Chart>;
+  lastResults: Record<string, DemoResult | { error: string }>;
+  /** True once every gallery card has rendered. */
+  ready: boolean;
+  /** Exports one chart with `includeReferenceImage: true` (no download) and returns the bytes. */
+  exportWithImage: (name: string) => Promise<{ bytes: number[]; warnings: Diagnostic[] }>;
+}
+
 declare global {
   interface Window {
-    __demo: { charts: Record<string, Chart>; lastResults: Record<string, DemoResult | { error: string }> };
+    __demo: DemoHandle;
   }
 }
 
 const charts: Record<string, Chart> = {};
-const lastResults: Window['__demo']['lastResults'] = {};
-window.__demo = { charts, lastResults };
+const lastResults: DemoHandle['lastResults'] = {};
+window.__demo = {
+  charts,
+  lastResults,
+  ready: false,
+  exportWithImage: async (name) => {
+    const chart = charts[name];
+    if (!chart) throw new Error(`[demo] no chart named "${name}"`);
+    const result = await exportHighchartsToXlsx(chart, { includeReferenceImage: true });
+    return { bytes: Array.from(result.bytes), warnings: result.warnings };
+  },
+};
 
 // Deterministic rendering: no animation; the accessibility module is not loaded in this demo.
 Highcharts.setOptions({
@@ -63,7 +84,11 @@ installHighchartsExcelExport(Highcharts, {
 // ---------------------------------------------------------------------------------------------
 // Rendering helpers
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: Array<Node | string>): HTMLElementTagNameMap[K] {
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  props: Partial<HTMLElementTagNameMap[K]> = {},
+  ...children: Array<Node | string>
+): HTMLElementTagNameMap[K] {
   const node = Object.assign(document.createElement(tag), props);
   node.append(...children);
   return node;
@@ -81,7 +106,13 @@ function nameOf(chart: unknown): string {
   return found?.[0] ?? 'unknown';
 }
 
-function panel(name: string): { details: HTMLDetailsElement; summary: HTMLElement; list: HTMLUListElement; pre: HTMLPreElement; status: HTMLElement } {
+function panel(name: string): {
+  details: HTMLDetailsElement;
+  summary: HTMLElement;
+  list: HTMLUListElement;
+  pre: HTMLPreElement;
+  status: HTMLElement;
+} {
   const details = document.querySelector<HTMLDetailsElement>(`[data-testid="warnings-${name}"]`)!;
   return {
     details,
@@ -104,7 +135,14 @@ function showResult(name: string, result: DemoResult): void {
       : warnings.map((w) => el('li', {}, el('code', { textContent: w.code }), ` — ${w.property} — ${w.message}`))),
   );
   p.pre.textContent = JSON.stringify(
-    { kind: result.kind, filename: result.filename, editable: report.editable, excelChartType: report.excelChartType, report, timings: result.timings },
+    {
+      kind: result.kind,
+      filename: result.filename,
+      editable: report.editable,
+      excelChartType: report.excelChartType,
+      report,
+      timings: result.timings,
+    },
     null,
     2,
   );
@@ -129,7 +167,13 @@ function showError(name: string, error: unknown): void {
 }
 
 /** One gallery card: title, note, chart, buttons and the warnings panel. Returns the chart. */
-function createCard(name: string, title: string, options: Options, note = '', extraButtons: (chart: Chart) => HTMLButtonElement[] = () => []): Chart {
+function createCard(
+  name: string,
+  title: string,
+  options: Options,
+  note = '',
+  extraButtons: (chart: Chart) => HTMLButtonElement[] = () => [],
+): Chart {
   const chartDiv = el('div', { id: `chart-${name}`, className: 'chart' });
   const actions = el('div', { className: 'actions' });
   const status = el('span', { className: 'status' });
@@ -144,7 +188,16 @@ function createCard(name: string, title: string, options: Options, note = '', ex
   );
   details.dataset.testid = `warnings-${name}`;
 
-  const card = el('article', { className: 'card' }, el('h2', { textContent: title }), el('p', { className: 'note', textContent: note }), el('div', { className: 'chart-frame' }, chartDiv), actions, status, details);
+  const card = el(
+    'article',
+    { className: 'card' },
+    el('h2', { textContent: title }),
+    el('p', { className: 'note', textContent: note }),
+    el('div', { className: 'chart-frame' }, chartDiv),
+    actions,
+    status,
+    details,
+  );
   card.dataset.chart = name;
   if (typeof options.chart?.width === 'number' && options.chart.width > 600) card.classList.add('wide');
   if (options.chart?.styledMode) card.classList.add('hc-styled-scope');
@@ -206,7 +259,10 @@ document.querySelector<HTMLButtonElement>('[data-testid="export-all"]')!.addEven
   try {
     const names = Object.keys(charts);
     const result = await exportChartsToWorkbook(
-      names.map((name) => ({ chart: charts[name], options: { chartSheetName: `${name} chart`, dataSheetName: `${name} data` } })),
+      names.map((name) => ({
+        chart: charts[name],
+        options: { chartSheetName: `${name} chart`, dataSheetName: `${name} data` },
+      })),
       { filename: 'all-charts.xlsx' },
     );
     triggerDownload(result.bytes, result.filename, result.mimeType);
@@ -219,3 +275,6 @@ document.querySelector<HTMLButtonElement>('[data-testid="export-all"]')!.addEven
     status.classList.add('error');
   }
 });
+
+// Every card is rendered and every button is wired: the e2e tests wait for this flag.
+window.__demo.ready = true;

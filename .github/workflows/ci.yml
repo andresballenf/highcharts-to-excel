@@ -5,13 +5,21 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        node: [22]
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -21,18 +29,27 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - run: pnpm lint
       - run: pnpm build
-      - run: pnpm test
+      - run: pnpm examples:typecheck
+      - run: pnpm demo:build
+      - name: Install LibreOffice and poppler (render checks)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-calc poppler-utils
+      - name: Unit and integration tests with coverage thresholds
+        run: pnpm coverage
+        env:
+          REQUIRE_RENDER: '1'
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
       - name: Pack and smoke-install the package
-        run: pnpm pack-check
+        run: pnpm pack-check --no-build
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: generated-workbooks
+          name: artifacts-node${{ matrix.node }}
           path: |
             tests/output/**/*.xlsx
-            e2e/output/**/*.xlsx
+            tests/output/render/**
+            e2e/output/**
           if-no-files-found: ignore

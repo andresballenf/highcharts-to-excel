@@ -16,6 +16,7 @@ import type {
 } from '../excel/writer-interface';
 import { colorToHex } from '../utils/colors';
 import { clamp } from '../utils/units';
+import { isValidExcelFormatCode } from '../utils/format-code';
 import { fontToOoxml } from '../translators/typography-translator';
 import { dashStyleToOoxml, markerRadiusToOoxmlSize, markerSymbolToOoxml } from '../translators/style-translator';
 
@@ -43,7 +44,11 @@ export function toExcelFill(fill: Fill | null, opacity = 1): ExcelFillSpec | nul
       if (fill.stops.length === 0) return null;
       return {
         type: 'gradient',
-        stops: fill.stops.map((s) => ({ pos: clamp(s.offset, 0, 1), hex: colorToHex(s.color), alpha: alphaOf(s.color.a, opacity) })),
+        stops: fill.stops.map((s) => ({
+          pos: clamp(s.offset, 0, 1),
+          hex: colorToHex(s.color),
+          alpha: alphaOf(s.color.a, opacity),
+        })),
         angle: Number.isFinite(fill.angle) ? fill.angle : 0,
       };
     }
@@ -52,7 +57,13 @@ export function toExcelFill(fill: Fill | null, opacity = 1): ExcelFillSpec | nul
   }
 }
 
-export const NO_LINE: Readonly<ExcelLineSpec> = Object.freeze({ widthPx: 0, hex: null, alpha: 1, dash: 'solid', noFill: true });
+export const NO_LINE: Readonly<ExcelLineSpec> = Object.freeze({
+  widthPx: 0,
+  hex: null,
+  alpha: 1,
+  dash: 'solid',
+  noFill: true,
+});
 
 /**
  * Stroke → Excel line. Width 0 (or a fully transparent color) → explicit "no line".
@@ -72,11 +83,21 @@ export function toExcelLine(stroke: Stroke | null, fallbackColor: Color | null =
 }
 
 /** Font → Excel font (via fontToOoxml); its diagnostic, if any, goes to `sink`. */
-export function toExcelFont(font: Font | null, property = 'style.fontFamily', sink?: Diagnostic[]): ExcelFontSpec | null {
+export function toExcelFont(
+  font: Font | null,
+  property = 'style.fontFamily',
+  sink?: Diagnostic[],
+): ExcelFontSpec | null {
   if (!font) return null;
   const r = fontToOoxml(font, property);
   if (r.diagnostic && sink) sink.push(r.diagnostic);
-  return { typeface: r.typeface, sizeHundredthsPt: r.sizeHundredthsPt, bold: r.bold, italic: r.italic, colorHex: r.colorHex };
+  return {
+    typeface: r.typeface,
+    sizeHundredthsPt: r.sizeHundredthsPt,
+    bold: r.bold,
+    italic: r.italic,
+    colorHex: r.colorHex,
+  };
 }
 
 /** Marker → Excel marker. Disabled markers → symbol 'none'. */
@@ -137,7 +158,7 @@ export function toExcelDataLabels(
   sink?: Diagnostic[],
   seriesIndex?: number,
 ): ExcelDataLabelsSpec | null {
-  if (!dl || !dl.enabled) return null;
+  if (!dl?.enabled) return null;
   const extra = seriesIndex !== undefined ? { seriesIndex } : {};
   let position: ExcelDataLabelPosition | null = null;
   const requested = dl.position ?? 'auto';
@@ -146,31 +167,71 @@ export function toExcelDataLabels(
     if (position === 'outEnd' && groupKind === 'bar' && isStacked) {
       position = 'inEnd';
       sink?.push(
-        createDiagnostic('APPROXIMATED_DATA_LABELS', 'approximated', `${property}.position`, 'Excel cannot place labels outside stacked bars; labels are placed at the inside end.', extra),
+        createDiagnostic(
+          'APPROXIMATED_DATA_LABELS',
+          'approximated',
+          `${property}.position`,
+          'Excel cannot place labels outside stacked bars; labels are placed at the inside end.',
+          extra,
+        ),
       );
     }
     const valid = VALID_POSITIONS[groupKind === 'bar' && isStacked ? 'barStacked' : groupKind];
     if (position !== null && !valid.has(position)) {
       sink?.push(
-        createDiagnostic('APPROXIMATED_DATA_LABELS', 'approximated', `${property}.position`, `Label position "${requested}" is not available for this Excel chart type; Excel's default is used.`, extra),
+        createDiagnostic(
+          'APPROXIMATED_DATA_LABELS',
+          'approximated',
+          `${property}.position`,
+          `Label position "${requested}" is not available for this Excel chart type; Excel's default is used.`,
+          extra,
+        ),
       );
       position = null;
     }
   } else if (requested !== 'auto') {
     sink?.push(
-      createDiagnostic('APPROXIMATED_DATA_LABELS', 'approximated', `${property}.position`, 'Excel does not allow positioning labels on area/doughnut charts; the default position is used.', {
-        ...extra,
-        severity: 'info',
-      }),
+      createDiagnostic(
+        'APPROXIMATED_DATA_LABELS',
+        'approximated',
+        `${property}.position`,
+        'Excel does not allow positioning labels on area/doughnut charts; the default position is used.',
+        {
+          ...extra,
+          severity: 'info',
+        },
+      ),
     );
   }
   let numberFormat: string | null = null;
-  if (dl.format && dl.format.kind === 'excel') numberFormat = dl.format.code;
+  if (dl.format && dl.format.kind === 'excel' && isValidExcelFormatCode(dl.format.code)) numberFormat = dl.format.code;
+  let showValue = dl.showValue ?? true;
+  let showPercent = dl.showPercentage ?? false;
+  if (showPercent && groupKind !== 'pie' && groupKind !== 'doughnut') {
+    // Excel ignores showPercent outside pie/doughnut charts.
+    showPercent = false;
+    const onlyPercent = !showValue && !(dl.showCategoryName ?? false) && !(dl.showSeriesName ?? false);
+    if (onlyPercent) {
+      showValue = true;
+      numberFormat = null; // the format was written for percentages, not for the values
+    }
+    sink?.push(
+      createDiagnostic(
+        'APPROXIMATED_DATA_LABELS',
+        'approximated',
+        `${property}.format`,
+        onlyPercent
+          ? 'Excel shows percentages only on pie charts; values are shown instead.'
+          : 'Excel shows percentages only on pie charts; the percentage part of the label is dropped.',
+        extra,
+      ),
+    );
+  }
   return {
-    showValue: dl.showValue ?? true,
+    showValue,
     showCategoryName: dl.showCategoryName ?? false,
     showSeriesName: dl.showSeriesName ?? false,
-    showPercent: dl.showPercentage ?? false,
+    showPercent,
     position,
     numberFormat,
     font: toExcelFont(dl.font ?? null, `${property}.style`, sink),
@@ -199,7 +260,10 @@ export function legendPosition(legend: LegendModel): {
   overlay: boolean;
   diagnostic?: Diagnostic;
 } {
-  const approx = (pos: 'b' | 't', where: string): { position: 'b' | 't'; overlay: boolean; diagnostic: Diagnostic } => ({
+  const approx = (
+    pos: 'b' | 't',
+    where: string,
+  ): { position: 'b' | 't'; overlay: boolean; diagnostic: Diagnostic } => ({
     position: pos,
     overlay: legend.overlay,
     diagnostic: createDiagnostic(

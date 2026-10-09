@@ -46,7 +46,11 @@ const ABSOLUTE_SIZE_KEYWORDS: Readonly<Record<string, number>> = {
  * Builds a Font from a CSS style object. Missing or unparseable fields inherit from `base`.
  * The `font` shorthand is applied first; longhand properties override it.
  */
-export function toFont(style: CssStyleLike | undefined | null, base: Font | null, resolveVariable?: CssVariableResolver): Font {
+export function toFont(
+  style: CssStyleLike | undefined | null,
+  base: Font | null,
+  resolveVariable?: CssVariableResolver,
+): Font {
   const font: Font = base
     ? { family: base.family, size: base.size, bold: base.bold, italic: base.italic, color: base.color }
     : { family: null, size: null, bold: false, italic: false, color: null };
@@ -167,7 +171,12 @@ export function primaryFontFamily(family: string | null): { name: string | null;
   if (typeof family !== 'string') return { name: null, generic: false };
   const entries = family
     .split(',')
-    .map((f) => f.trim().replace(/^(['"])(.*)\1$/, '$2').trim())
+    .map((f) =>
+      f
+        .trim()
+        .replace(/^(['"])(.*)\1$/, '$2')
+        .trim(),
+    )
     .filter(Boolean);
   if (entries.length === 0) return { name: null, generic: false };
   const chosen = entries.find((e) => !SYSTEM_FAMILIES.has(e.toLowerCase())) ?? entries[0] ?? '';

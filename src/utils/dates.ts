@@ -3,21 +3,33 @@
  */
 
 import type { NumberFormat } from '../types/chart-model';
+import { excelFormatCodeProblem } from './format-code';
 
 /** Days between the Excel 1900 epoch (with the 1900 leap-year bug) and 1970-01-01. */
 export const EXCEL_EPOCH_OFFSET_DAYS = 25569;
 
 const MS_PER_DAY = 86_400_000;
 
-/** Converts a UTC timestamp in ms to an Excel serial date (no timezone shift). */
+/** Serial (offset-based, before the leap-year correction) of 1900-03-01, the first date after Excel's fake 1900-02-29. */
+const FIRST_SERIAL_AFTER_FAKE_LEAP_DAY = 61;
+
+/**
+ * Converts a UTC timestamp in ms to an Excel serial date (no timezone shift).
+ * Excel treats 1900 as a leap year (serial 60 = the non-existent 1900-02-29), so dates before
+ * 1900-03-01 are one lower than the plain offset gives: 1900-01-01 → 1, 1900-02-28 → 59,
+ * 1899-12-31 → 0. Dates before 1899-12-31 have no Excel date: the result is negative and callers
+ * must not write it as a date.
+ */
 export function msToExcelSerial(ms: number): number {
-  const serial = ms / MS_PER_DAY + EXCEL_EPOCH_OFFSET_DAYS;
+  let serial = ms / MS_PER_DAY + EXCEL_EPOCH_OFFSET_DAYS;
+  if (serial < FIRST_SERIAL_AFTER_FAKE_LEAP_DAY) serial -= 1;
   return Math.round(serial * 1e9) / 1e9;
 }
 
 /** Converts an Excel serial date back to a UTC timestamp in ms (rounded to the millisecond). */
 export function excelSerialToMs(serial: number): number {
-  return Math.round((serial - EXCEL_EPOCH_OFFSET_DAYS) * MS_PER_DAY);
+  const s = serial < FIRST_SERIAL_AFTER_FAKE_LEAP_DAY - 1 ? serial + 1 : serial;
+  return Math.round((s - EXCEL_EPOCH_OFFSET_DAYS) * MS_PER_DAY);
 }
 
 /** Characters Excel shows literally in a date format without quoting. */
@@ -38,6 +50,7 @@ export function highchartsDateFormatToExcel(format: string): NumberFormat {
   let code = '';
   let literal = '';
   let needsAmPm = false;
+  let seenHour = false;
 
   const flushLiteral = (): void => {
     if (!literal) return;
@@ -90,18 +103,29 @@ export function highchartsDateFormatToExcel(format: string): NumberFormat {
         emit('dddd');
         break;
       case 'H':
+        seenHour = true;
         emit('hh');
         break;
       case 'k':
+        seenHour = true;
         emit('h');
         break;
       case 'I':
       case 'l':
+        seenHour = true;
         emit(t === 'I' ? 'hh' : 'h');
         if (!hasAmPm) needsAmPm = true;
         break;
       case 'M':
-        // Excel reads `mm` as minutes when it follows an hour token or precedes seconds.
+        // Excel reads `mm` as minutes only when it follows an hour token or precedes seconds;
+        // anywhere else it would show the month.
+        if (!seenHour && !format.slice(i + 1).includes('%S')) {
+          return {
+            kind: 'unsupported',
+            reason: 'Minutes (%M) without an hour or seconds token read as months in Excel',
+            source: format,
+          };
+        }
         emit('mm');
         break;
       case 'S':
@@ -129,6 +153,9 @@ export function highchartsDateFormatToExcel(format: string): NumberFormat {
   }
   flushLiteral();
   if (needsAmPm) code += ' AM/PM';
+  const problem = excelFormatCodeProblem(code);
+  if (problem !== null)
+    return { kind: 'unsupported', reason: `Excel date format would be invalid (${problem})`, source: format };
   return { kind: 'excel', code, source: format };
 }
 

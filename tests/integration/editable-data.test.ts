@@ -109,17 +109,23 @@ describe('editable data round-trip (structure, not Excel recalculation)', () => 
   it('@office-kit/xlsx: edit Data!B2 → 999, save, chart formulas still point at the edited range', async () => {
     const input = join(OUT, 'multi-line-original.xlsx');
     const output = join(OUT, 'multi-line-edited-officekit.xlsx');
-    const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', OFFICE_KIT_EDIT, input, output, `Data!${EDIT_REF}`, String(NEW_VALUE)], {
-      cwd: REPO,
-      encoding: 'utf8',
-      timeout: 60_000,
-    });
+    const stdout = execFileSync(
+      process.execPath,
+      ['--input-type=module', '-e', OFFICE_KIT_EDIT, input, output, `Data!${EDIT_REF}`, String(NEW_VALUE)],
+      {
+        cwd: REPO,
+        encoding: 'utf8',
+        timeout: 60_000,
+      },
+    );
     const { before, reloaded } = JSON.parse(stdout) as { before: unknown; reloaded: unknown };
     expect(before).toBe(1);
     expect(reloaded).toBe(NEW_VALUE);
     const saved = new Uint8Array(readFileSync(output));
     const x = await assertEditedInvariants(saved, 'office-kit');
-    console.info(`[editable-data] office-kit: ${EDIT_REF} after = ${String(x.cellValue(x.sheetPath('Data'), EDIT_REF))}`);
+    console.info(
+      `[editable-data] office-kit: ${EDIT_REF} after = ${String(x.cellValue(x.sheetPath('Data'), EDIT_REF))}`,
+    );
   });
 
   it('fflate (library-independent): rewrite <v> of B2 in the sheet XML, rezip, same invariants', async () => {

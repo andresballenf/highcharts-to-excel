@@ -41,6 +41,7 @@ describe('translateFormatString', () => {
   });
 
   it('handles decimals, grouping and currency prefixes', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a Highcharts format string, not a template
     expect(codeOf('${point.y:,.2f}', dl)).toBe('$#,##0.00');
     expect(codeOf('{value:.2f}')).toBe('0.00');
     expect(codeOf('{y:.1f}', dl)).toBe('0.0');
@@ -62,13 +63,20 @@ describe('translateFormatString', () => {
     expect(r.format?.kind).toBe('unsupported');
     expect(r).toMatchObject({ showValue: true, showCategoryName: false, showSeriesName: false, showPercentage: false });
     expect(r.diagnostics).toHaveLength(1);
-    expect(r.diagnostics[0]).toMatchObject({ code: 'UNSUPPORTED_FORMATTER', outcome: 'unsupported', property: 'series[0].dataLabels.formatter' });
+    expect(r.diagnostics[0]).toMatchObject({
+      code: 'UNSUPPORTED_FORMATTER',
+      outcome: 'unsupported',
+      property: 'series[0].dataLabels.formatter',
+    });
     expect(translateFormatString(undefined, () => 'x', axis).showValue).toBe(false);
   });
 
   it('builds codes from valueDecimals/prefix/suffix when no format is given', () => {
     const tooltip: FormatContext = { kind: 'tooltip', property: 'tooltip', valueDecimals: 2, valueSuffix: ' °C' };
-    expect(translateFormatString(undefined, undefined, tooltip).format).toEqual({ kind: 'excel', code: '#,##0.00 "°C"' });
+    expect(translateFormatString(undefined, undefined, tooltip).format).toEqual({
+      kind: 'excel',
+      code: '#,##0.00 "°C"',
+    });
     const none = translateFormatString('', undefined, axis);
     expect(none.format).toBeNull();
     expect(none.showValue).toBe(true);
@@ -76,14 +84,23 @@ describe('translateFormatString', () => {
 
   it('harvests the value format from tooltip point formats', () => {
     const tooltip: FormatContext = { kind: 'tooltip', property: 'tooltip', valueDecimals: 1, valuePrefix: '$' };
-    const r = translateFormatString('<span style="color:{point.color}">●</span> {series.name}: <b>{point.y}</b><br/>', undefined, tooltip);
+    const r = translateFormatString(
+      '<span style="color:{point.color}">●</span> {series.name}: <b>{point.y}</b><br/>',
+      undefined,
+      tooltip,
+    );
     expect(r.format).toMatchObject({ kind: 'excel', code: '$#,##0.0' });
     expect(r.diagnostics).toEqual([]);
   });
 
   it('sets pie data label switches', () => {
     const pie = translateFormatString('<b>{point.name}</b>: {point.percentage:.1f} %', undefined, dl);
-    expect(pie).toMatchObject({ showValue: false, showCategoryName: true, showSeriesName: false, showPercentage: true });
+    expect(pie).toMatchObject({
+      showValue: false,
+      showCategoryName: true,
+      showSeriesName: false,
+      showPercentage: true,
+    });
     expect(pie.format).toMatchObject({ kind: 'excel', code: '0.0 %' });
     expect(pie.diagnostics).toEqual([]);
 
@@ -126,5 +143,20 @@ describe('translateFormatString', () => {
     const r = translateFormatString('Q {value}', undefined, { ...axis, axisType: 'category' });
     expect(r.format).toBeNull();
     expect(r.diagnostics[0]).toMatchObject({ code: 'APPROXIMATED_NUMBER_FORMAT', outcome: 'approximated' });
+  });
+});
+
+describe('W5: invalid Excel number format codes', () => {
+  it('falls back to General with UNSUPPORTED_NUMBER_FORMAT when the code exceeds 255 characters', () => {
+    const long = 'x'.repeat(300);
+    const r = translateFormatString(`${long}{value}`, undefined, axis);
+    expect(r.format).toMatchObject({ kind: 'excel', code: 'General' });
+    expect(r.diagnostics.find((d) => d.code === 'UNSUPPORTED_NUMBER_FORMAT')).toMatchObject({
+      outcome: 'unsupported',
+      property: 'yAxis[0].labels.format',
+    });
+    const viaSuffix = translateFormatString(undefined, undefined, { ...axis, kind: 'tooltip', valueSuffix: long });
+    expect(viaSuffix.format).toMatchObject({ kind: 'excel', code: 'General' });
+    expect(viaSuffix.diagnostics.some((d) => d.code === 'UNSUPPORTED_NUMBER_FORMAT')).toBe(true);
   });
 });

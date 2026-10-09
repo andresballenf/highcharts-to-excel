@@ -6,6 +6,7 @@ const MAX_FILENAME_LENGTH = 120;
 const MAX_SHEET_NAME_LENGTH = 31;
 const XLSX_SUFFIX = '.xlsx';
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: filenames must not contain control characters
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
 
 /**
@@ -15,7 +16,10 @@ const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
 export function sanitizeFilename(name: string | undefined | null, fallback = 'chart'): string {
   const clean = (raw: string): { base: string; suffix: string } => {
     // Whitespace controls (tab, CR, LF) become spaces; other controls are removed.
-    let s = raw.replace(/\s+/g, ' ').replace(CONTROL_CHARS, '').replace(/[\\/:*?"<>|]/g, '');
+    let s = raw
+      .replace(/\s+/g, ' ')
+      .replace(CONTROL_CHARS, '')
+      .replace(/[\\/:*?"<>|]/g, '');
     s = s.replace(/\s+/g, ' ').trim();
     let suffix = XLSX_SUFFIX;
     if (s.toLowerCase().endsWith(XLSX_SUFFIX)) {
@@ -57,7 +61,10 @@ export function sanitizeSheetName(
 ): { name: string; adjusted: boolean } {
   const provided = typeof name === 'string';
   const clean = (raw: string): string => {
-    let s = raw.replace(CONTROL_CHARS, '').replace(/[[\]:*?/\\]/g, '').trim();
+    let s = raw
+      .replace(CONTROL_CHARS, '')
+      .replace(/[[\]:*?/\\]/g, '')
+      .trim();
     s = stripApostrophes(s);
     if (s.length > MAX_SHEET_NAME_LENGTH) s = stripApostrophes(sliceSafe(s, MAX_SHEET_NAME_LENGTH));
     return s;

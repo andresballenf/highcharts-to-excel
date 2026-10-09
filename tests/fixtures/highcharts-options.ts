@@ -125,8 +125,25 @@ export const scatterChart: Options = {
   chart: { type: 'scatter' },
   title: { text: 'Scatter' },
   series: [
-    { type: 'scatter', name: 'Female', data: [[161.2, 51.6], [167.5, 59.0], [159.5, 49.2], [157.0, 63.0]] },
-    { type: 'scatter', name: 'Male', data: [[174.0, 65.6], [175.3, 71.8], [193.5, 80.7]] },
+    {
+      type: 'scatter',
+      name: 'Female',
+      data: [
+        [161.2, 51.6],
+        [167.5, 59.0],
+        [159.5, 49.2],
+        [157.0, 63.0],
+      ],
+    },
+    {
+      type: 'scatter',
+      name: 'Male',
+      data: [
+        [174.0, 65.6],
+        [175.3, 71.8],
+        [193.5, 80.7],
+      ],
+    },
   ],
 };
 
@@ -158,7 +175,13 @@ export const percentChart: Options = {
 
 export const customColors: Options = {
   chart: {
-    backgroundColor: { linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 }, stops: [[0, '#ffffff'], [1, '#dddddd']] },
+    backgroundColor: {
+      linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+      stops: [
+        [0, '#ffffff'],
+        [1, '#dddddd'],
+      ],
+    },
   },
   title: { text: 'Custom colors' },
   xAxis: { categories: ['A', 'B', 'C'] },
@@ -255,8 +278,24 @@ export const bubbleChart: Options = {
   chart: { type: 'bubble' },
   title: { text: 'Bubble' },
   series: [
-    { type: 'bubble', name: 'B1', data: [[9, 81, 63], [98, 5, 89], [51, 50, 73]] },
-    { type: 'bubble', name: 'B2', data: [[42, 38, 20], [6, 18, 1], [1, 93, 55]] },
+    {
+      type: 'bubble',
+      name: 'B1',
+      data: [
+        [9, 81, 63],
+        [98, 5, 89],
+        [51, 50, 73],
+      ],
+    },
+    {
+      type: 'bubble',
+      name: 'B2',
+      data: [
+        [42, 38, 20],
+        [6, 18, 1],
+        [1, 93, 55],
+      ],
+    },
   ],
 };
 
@@ -265,7 +304,17 @@ export const unsupportedType: Options = {
   chart: { type: 'columnrange' },
   title: { text: 'Column range' },
   xAxis: { categories: ['Jan', 'Feb', 'Mar'] },
-  series: [{ type: 'columnrange', name: 'Temperatures', data: [[-9.5, 8.0], [-7.8, 8.3], [-13.1, 9.2]] }],
+  series: [
+    {
+      type: 'columnrange',
+      name: 'Temperatures',
+      data: [
+        [-9.5, 8.0],
+        [-7.8, 8.3],
+        [-13.1, 9.2],
+      ],
+    },
+  ],
 };
 
 /** [more] */

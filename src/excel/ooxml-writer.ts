@@ -44,7 +44,9 @@ function validateSheets(sheets: readonly SheetSpec[]): void {
 }
 
 function isPng(bytes: Uint8Array): boolean {
-  return bytes instanceof Uint8Array && bytes.length > PNG_SIGNATURE.length && PNG_SIGNATURE.every((b, i) => bytes[i] === b);
+  return (
+    bytes instanceof Uint8Array && bytes.length > PNG_SIGNATURE.length && PNG_SIGNATURE.every((b, i) => bytes[i] === b)
+  );
 }
 
 /** Build every package part (path → bytes) in zip order, `[Content_Types].xml` first. */
@@ -56,9 +58,7 @@ export function buildPackageParts(wb: WorkbookSpec): Map<string, Uint8Array> {
   for (const sheet of wb.sheets) for (const row of sheet.rows) for (const c of row.cells) allStyles.push(c.style);
   const styles = buildStyles(allStyles);
 
-  const overrides: ContentTypeOverride[] = [
-    { partName: '/xl/workbook.xml', contentType: CT.workbook },
-  ];
+  const overrides: ContentTypeOverride[] = [{ partName: '/xl/workbook.xml', contentType: CT.workbook }];
   const xlParts: Array<[string, Uint8Array]> = [];
   const activeTab = wb.sheets.findIndex((s) => !s.hidden);
   const { xml: workbookRels, sheetRelIds } = buildWorkbookRelsXml(wb.sheets.length);

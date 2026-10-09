@@ -83,7 +83,12 @@ describe('large data', () => {
       const r = checkLimits(EXCEL_MAX_POINTS_PER_SERIES + 1, 2, EXCEL_MAX_POINTS_PER_SERIES + 1, 3);
       expect(r.blocking).toBe(false);
       expect(r.diagnostics).toHaveLength(1);
-      expect(r.diagnostics[0]).toMatchObject({ code: 'ROW_LIMIT_EXCEEDED', outcome: 'approximated', seriesIndex: 3, property: 'series[3].data' });
+      expect(r.diagnostics[0]).toMatchObject({
+        code: 'ROW_LIMIT_EXCEEDED',
+        outcome: 'approximated',
+        seriesIndex: 3,
+        property: 'series[3].data',
+      });
     });
   });
 });

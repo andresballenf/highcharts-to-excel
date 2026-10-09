@@ -4,13 +4,21 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { BenchRow } from '../tests/integration/bench.test';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const vitest = resolve(root, 'node_modules/vitest/vitest.mjs');
+
+const benchJson = resolve(root, 'tests/output/bench.json');
+const startedAt = Date.now();
+
+// The benchmark suite only runs when BENCH === '1'; this script always sets it for the child.
+if (process.env.BENCH !== undefined && process.env.BENCH !== '1') {
+  console.info(`bench: ignoring BENCH=${process.env.BENCH}; the child vitest run gets BENCH=1`);
+}
 
 const nodeOptions = [process.env.NODE_OPTIONS ?? '', '--expose-gc'].join(' ').trim();
 const run = spawnSync(process.execPath, [vitest, 'run', 'tests/integration/bench.test.ts'], {
@@ -23,7 +31,12 @@ if (run.status !== 0) {
   process.exit(run.status ?? 1);
 }
 
-const report = JSON.parse(readFileSync(resolve(root, 'tests/output/bench.json'), 'utf8')) as {
+if (!existsSync(benchJson) || statSync(benchJson).mtimeMs < startedAt) {
+  console.error('bench: tests/output/bench.json was not written by this run (was the suite skipped? it needs BENCH=1)');
+  process.exit(1);
+}
+
+const report = JSON.parse(readFileSync(benchJson, 'utf8')) as {
   node: string;
   highchartsVersion: string | null;
   gcExposed: boolean;

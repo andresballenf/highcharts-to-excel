@@ -2,7 +2,18 @@
  * Chart-level styling: background, border, plot area, title/subtitle, legend, palette, fonts.
  */
 
-import type { Color, Fill, Font, HorizontalAlign, LegendModel, LegendPosition, PlotAreaModel, Stroke, TextBlock, VerticalAlign } from '../types/chart-model';
+import type {
+  Color,
+  Fill,
+  Font,
+  HorizontalAlign,
+  LegendModel,
+  LegendPosition,
+  PlotAreaModel,
+  Stroke,
+  TextBlock,
+  VerticalAlign,
+} from '../types/chart-model';
 import type { DiagnosticCollector } from '../types/diagnostics';
 import { toFill } from '../translators/color-translator';
 import { strokeFromOptions } from '../translators/style-translator';
@@ -10,7 +21,7 @@ import { DEFAULT_HIGHCHARTS_FONT, toFont, type CssStyleLike } from '../translato
 import { HIGHCHARTS_DEFAULT_PALETTE, parseColor, type CssVariableResolver } from '../utils/colors';
 import { readEffectiveStyle } from './css-resolver';
 import { arr, bool, deepMerge, get, num, plainText, rec, str, type Rec } from './guards';
-import type { ChartView, HcChartLike } from './types';
+import type { ChartView, HcChartLike, SeriesView } from './types';
 
 /**
  * Highcharts 11-13 component text defaults. They are relative to the chart font (`chart.style`,
@@ -67,7 +78,12 @@ export function extractPalette(opts: Rec, resolver: CssVariableResolver): Color[
 }
 
 /** toFill that reports its diagnostic under `property`. */
-export function fillAt(input: unknown, view: ChartView, diagnostics: DiagnosticCollector, property: string): Fill | null {
+export function fillAt(
+  input: unknown,
+  view: ChartView,
+  diagnostics: DiagnosticCollector,
+  property: string,
+): Fill | null {
   const { fill, diagnostic } = toFill(input, view.resolver, property);
   if (diagnostic) diagnostics.add(diagnostic);
   return fill;
@@ -84,7 +100,11 @@ export function borderStroke(
   const w = num(width) ?? defaults.width;
   if (w <= 0) return null;
   const fallbackColor = parseColor(defaults.color, view.resolver);
-  return strokeFromOptions({ color, width: w, dashStyle }, { color: fallbackColor, width: w, dash: 'solid' }, view.resolver);
+  return strokeFromOptions(
+    { color, width: w, dashStyle },
+    { color: fallbackColor, width: w, dash: 'solid' },
+    view.resolver,
+  );
 }
 
 function hAlign(x: unknown, fallback: HorizontalAlign): HorizontalAlign {
@@ -117,29 +137,40 @@ function textBlock(view: ChartView, which: 'title' | 'subtitle'): TextBlock | nu
 
 const NON_LEGEND_TYPES = new Set(['pie', 'variablepie', 'funnel', 'pyramid']);
 
+/**
+ * Highcharts `showInLegend`: explicit option, else true except for pie-like series (whose legend,
+ * when enabled, lists points rather than the series).
+ */
+export function seriesShowsInLegend(s: SeriesView): boolean {
+  return bool(s.opts.showInLegend) ?? !NON_LEGEND_TYPES.has(s.type);
+}
+
 function legendPosition(align: string, verticalAlign: string, diagnostics: DiagnosticCollector): LegendPosition {
   if (verticalAlign === 'bottom') return 'bottom';
   if (verticalAlign === 'top') return align === 'right' ? 'topRight' : align === 'left' ? 'topLeft' : 'top';
   if (align === 'right') return 'right';
   if (align === 'left') return 'left';
-  diagnostics.report('APPROXIMATED_LEGEND_POSITION', 'approximated', 'legend.align', 'A legend centered over the plot area is placed at the right.', {
-    severity: 'info',
-    details: { align, verticalAlign },
-  });
+  diagnostics.report(
+    'APPROXIMATED_LEGEND_POSITION',
+    'approximated',
+    'legend.align',
+    'A legend centered over the plot area is placed at the right.',
+    {
+      severity: 'info',
+      details: { align, verticalAlign },
+    },
+  );
   return 'right';
 }
 
 function extractLegend(view: ChartView, diagnostics: DiagnosticCollector): LegendModel {
   const o = rec(view.opts.legend) ?? {};
-  // A legend without items is not drawn (pie series default to showInLegend: false).
-  const hasItems = view.series.some((s) => {
-    const show = bool(s.opts.showInLegend);
-    return show ?? !NON_LEGEND_TYPES.has(s.type);
-  });
+  // A legend without items is not drawn; whether the EXPORTED series have items is decided after
+  // series extraction (extract-chart.ts), so hidden, excluded series do not keep the legend on.
   const align = str(o.align) ?? 'center';
   const verticalAlign = str(o.verticalAlign) ?? 'bottom';
   return {
-    enabled: o.enabled !== false && hasItems,
+    enabled: o.enabled !== false,
     position: legendPosition(align, verticalAlign, diagnostics),
     layout: o.layout === 'vertical' ? 'vertical' : 'horizontal',
     font: fontFor(view, 'legend', o.itemStyle),
@@ -169,7 +200,12 @@ export function extractChartStyles(view: ChartView, diagnostics: DiagnosticColle
     background = computed.fill ? fillAt(computed.fill, view, diagnostics, 'chart.backgroundColor') : null;
     background ??= fillAt('#ffffff', view, diagnostics, 'chart.backgroundColor');
   } else {
-    background = fillAt(c.backgroundColor === undefined ? '#ffffff' : c.backgroundColor, view, diagnostics, 'chart.backgroundColor');
+    background = fillAt(
+      c.backgroundColor === undefined ? '#ffffff' : c.backgroundColor,
+      view,
+      diagnostics,
+      'chart.backgroundColor',
+    );
   }
 
   let plotBackground: Fill | null = null;

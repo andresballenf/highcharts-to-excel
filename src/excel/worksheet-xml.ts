@@ -6,7 +6,7 @@
  */
 import { EXCEL_MAX_COLUMNS, EXCEL_MAX_ROWS, type CellSpec, type SheetSpec } from './writer-interface';
 import type { StylesResult } from './styles-xml';
-import { a1, el, escapeXml, formatNumber, xmlDocument } from './xml';
+import { a1, el, escapeXstring, formatNumber, xmlDocument } from './xml';
 
 const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -46,11 +46,15 @@ function cellXml(cell: CellSpec, styles: StylesResult): string | null {
       if (!Number.isFinite(v.value)) return s !== 0 ? `<c r="${ref}"${sAttr}/>` : null;
       return `<c r="${ref}"${sAttr}><v>${formatNumber(v.value)}</v></c>`;
     case 'string':
-      return `<c r="${ref}"${sAttr} t="inlineStr"><is><t xml:space="preserve">${escapeXml(truncateCellText(v.value))}</t></is></c>`;
+      return `<c r="${ref}"${sAttr} t="inlineStr"><is><t xml:space="preserve">${escapeXstring(truncateCellText(v.value))}</t></is></c>`;
     case 'boolean':
       return `<c r="${ref}"${sAttr} t="b"><v>${v.value ? 1 : 0}</v></c>`;
     case 'blank':
       return s !== 0 ? `<c r="${ref}"${sAttr}/>` : null;
+    case 'error':
+      // Only #N/A is modelled: line/area charts skip it and connect the neighbouring points.
+      if ((v.value as string) !== '#N/A') throw new Error(`Unsupported cell error value ${JSON.stringify(v.value)}`);
+      return `<c r="${ref}"${sAttr} t="e"><v>#N/A</v></c>`;
     default: {
       const never: never = v;
       throw new Error(`Unknown cell value type ${JSON.stringify(never)}`);
@@ -66,7 +70,10 @@ export function buildWorksheetXml(sheet: SheetSpec, styles: StylesResult, opts: 
       assertIndex(cell.row0, EXCEL_MAX_ROWS, 'row', sheet.name);
       assertIndex(cell.col0, EXCEL_MAX_COLUMNS, 'column', sheet.name);
       let r = rows.get(cell.row0);
-      if (!r) rows.set(cell.row0, (r = new Map()));
+      if (!r) {
+        r = new Map();
+        rows.set(cell.row0, r);
+      }
       if (r.has(cell.col0)) throw new Error(`Sheet "${sheet.name}": duplicate cell ${a1(cell.col0, cell.row0)}`);
       r.set(cell.col0, cell);
     }
@@ -115,7 +122,10 @@ export function buildWorksheetXml(sheet: SheetSpec, styles: StylesResult, opts: 
   }
   const cols = [...colWidths.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([c0, w]) => `<col min="${c0 + 1}" max="${c0 + 1}" width="${formatNumber(Math.round(w * 100) / 100)}" customWidth="1"/>`);
+    .map(
+      ([c0, w]) =>
+        `<col min="${c0 + 1}" max="${c0 + 1}" width="${formatNumber(Math.round(w * 100) / 100)}" customWidth="1"/>`,
+    );
 
   const body = [
     `<dimension ref="${dimension}"/>`,

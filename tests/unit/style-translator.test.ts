@@ -40,8 +40,15 @@ describe('markers', () => {
     expect(markerSymbolToOoxml('none')).toEqual({ symbol: 'none' });
     const down = markerSymbolToOoxml('triangle-down', 'series[2].marker.symbol');
     expect(down.symbol).toBe('triangle');
-    expect(down.diagnostic).toMatchObject({ code: 'APPROXIMATED_MARKER', outcome: 'approximated', property: 'series[2].marker.symbol' });
-    expect(markerSymbolToOoxml('other')).toMatchObject({ symbol: 'circle', diagnostic: { code: 'APPROXIMATED_MARKER' } });
+    expect(down.diagnostic).toMatchObject({
+      code: 'APPROXIMATED_MARKER',
+      outcome: 'approximated',
+      property: 'series[2].marker.symbol',
+    });
+    expect(markerSymbolToOoxml('other')).toMatchObject({
+      symbol: 'circle',
+      diagnostic: { code: 'APPROXIMATED_MARKER' },
+    });
   });
   it('converts radius to c:size', () => {
     expect(markerRadiusToOoxmlSize(4)).toBe(6);

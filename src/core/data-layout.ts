@@ -8,6 +8,7 @@ import { createDiagnostic, type Diagnostic } from '../types/diagnostics';
 import type { CellSpec, CellStyleSpec, CellValue, RowSpec, SheetSpec } from '../excel/writer-interface';
 import { EXCEL_MAX_COLUMNS, EXCEL_MAX_POINTS_PER_SERIES, EXCEL_MAX_ROWS } from '../excel/writer-interface';
 import { msToExcelSerial } from '../utils/dates';
+import { isValidExcelFormatCode } from '../utils/format-code';
 import { cellRef, quoteSheetNameForFormula, rangeRef } from '../utils/filenames';
 import { isFormulaLike, stripControlChars } from '../utils/text';
 import { isCategoryGroupKind, type ChartTypeResolution } from './chart-type-registry';
@@ -77,21 +78,35 @@ export function checkLimits(
   if (rowCount + 1 > EXCEL_MAX_ROWS) {
     blocking = true;
     diagnostics.push(
-      createDiagnostic('ROW_LIMIT_EXCEEDED', 'blocking', 'series.data', `The data needs ${rowCount + 1} rows; an Excel worksheet holds at most ${EXCEL_MAX_ROWS}.`, {
-        details: { rows: rowCount + 1, limit: EXCEL_MAX_ROWS },
-      }),
+      createDiagnostic(
+        'ROW_LIMIT_EXCEEDED',
+        'blocking',
+        'series.data',
+        `The data needs ${rowCount + 1} rows; an Excel worksheet holds at most ${EXCEL_MAX_ROWS}.`,
+        {
+          details: { rows: rowCount + 1, limit: EXCEL_MAX_ROWS },
+        },
+      ),
     );
   }
   if (colCount > EXCEL_MAX_COLUMNS) {
     blocking = true;
     diagnostics.push(
-      createDiagnostic('COLUMN_LIMIT_EXCEEDED', 'blocking', 'series', `The data needs ${colCount} columns; an Excel worksheet holds at most ${EXCEL_MAX_COLUMNS}.`, {
-        details: { columns: colCount, limit: EXCEL_MAX_COLUMNS },
-      }),
+      createDiagnostic(
+        'COLUMN_LIMIT_EXCEEDED',
+        'blocking',
+        'series',
+        `The data needs ${colCount} columns; an Excel worksheet holds at most ${EXCEL_MAX_COLUMNS}.`,
+        {
+          details: { columns: colCount, limit: EXCEL_MAX_COLUMNS },
+        },
+      ),
     );
   }
   if (maxPointsPerSeries > EXCEL_MAX_POINTS_PER_SERIES) {
-    const extra: Parameters<typeof createDiagnostic>[4] = { details: { points: maxPointsPerSeries, limit: EXCEL_MAX_POINTS_PER_SERIES } };
+    const extra: Parameters<typeof createDiagnostic>[4] = {
+      details: { points: maxPointsPerSeries, limit: EXCEL_MAX_POINTS_PER_SERIES },
+    };
     if (seriesIndex !== undefined) extra.seriesIndex = seriesIndex;
     diagnostics.push(
       createDiagnostic(
@@ -135,7 +150,15 @@ class SheetBuilder {
     row.push(cell);
     const len =
       displayLen ??
-      (value.type === 'string' ? value.value.length : value.type === 'number' ? String(value.value).length : value.type === 'boolean' ? 5 : 0);
+      (value.type === 'string'
+        ? value.value.length
+        : value.type === 'number'
+          ? String(value.value).length
+          : value.type === 'boolean'
+            ? 5
+            : value.type === 'error'
+              ? value.value.length
+              : 0);
     this.widths.set(col0, Math.max(this.widths.get(col0) ?? 0, len));
   }
 
@@ -208,13 +231,13 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
   scatterPositions.sort((a, b) => a - b);
 
   const xAxis0 = model.xAxes[0] ?? null;
-  const xKind: AxisKind = xAxis0?.kind ?? inferXKind(model, categoryPositions.length > 0 ? categoryPositions : scatterPositions);
-  const isDatetime = xKind === 'datetime';
+  const sourceXKind: AxisKind =
+    xAxis0?.kind ?? inferXKind(model, categoryPositions.length > 0 ? categoryPositions : scatterPositions);
 
   // x extent over every exported series (for date format choice).
   let xMin: number | null = null;
   let xMax: number | null = null;
-  if (isDatetime) {
+  if (sourceXKind === 'datetime') {
     for (const pos of [...categoryPositions, ...scatterPositions]) {
       for (const p of model.series[pos]?.points ?? []) {
         if (p.x === null || !Number.isFinite(p.x)) continue;
@@ -223,20 +246,42 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
       }
     }
   }
+  // Excel has no dates before 1899-12-31 (negative serials). Such data is written as ISO date text in a
+  // category column (scatter X columns keep plain day numbers so the geometry survives).
+  const pre1900 = sourceXKind === 'datetime' && xMin !== null && msToExcelSerial(xMin) < 0;
+  if (pre1900) {
+    diagnostics.push(
+      createDiagnostic(
+        'APPROXIMATED_DATETIME',
+        'approximated',
+        'xAxis[0].type',
+        `Excel dates start on 1900-01-01; x values from ${isoDateText([xMin!])[0]} are written as date text on a category axis instead of a date axis.`,
+        { details: { min: xMin } },
+      ),
+    );
+  }
+  const xKind: AxisKind = pre1900 ? (categoryPositions.length > 0 ? 'category' : 'linear') : sourceXKind;
+  const isDatetime = xKind === 'datetime';
   const dateFormatCode =
-    isDatetime && xAxis0 ? opts.dateFormatCode(xAxis0, xMin !== null && xMax !== null ? xMax - xMin : 0) : isDatetime ? 'yyyy-mm-dd' : null;
+    isDatetime && xAxis0
+      ? opts.dateFormatCode(xAxis0, xMin !== null && xMax !== null ? xMax - xMin : 0)
+      : isDatetime
+        ? 'yyyy-mm-dd'
+        : null;
 
   // --- Plan the shapes (row/column counts) before writing anything ------------------------------
   let rowKeys: Array<string | number> = [];
-  let pieKeys: string[] = [];
+  const pieKeys: string[] = [];
   let categoryMode: 'label' | 'index' | 'numeric' = 'numeric';
   const categoryLabelByIndex = new Map<number, string>();
 
   if (categoryPositions.length > 0) {
-    if (xKind === 'category') {
-      const allIndexed = categoryPositions.every((pos) =>
-        (model.series[pos]?.points ?? []).every((p) => p.x !== null && Number.isInteger(p.x) && p.x >= 0),
-      );
+    if (xKind === 'category' && !pre1900) {
+      const allIndexed =
+        !pre1900 &&
+        categoryPositions.every((pos) =>
+          (model.series[pos]?.points ?? []).every((p) => p.x !== null && Number.isInteger(p.x) && p.x >= 0),
+        );
       if (allIndexed) {
         categoryMode = 'index';
         const set = new Set<number>();
@@ -259,7 +304,7 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
         for (const pos of categoryPositions) {
           const s = model.series[pos]!;
           s.points.forEach((p, j) => {
-            const key = categoryLabel(p, j, (model.xAxes[s.xAxisIndex] ?? xAxis0)?.categories ?? null);
+            const { key } = categoryLabel(p, j, (model.xAxes[s.xAxisIndex] ?? xAxis0)?.categories ?? null);
             if (!seen.has(key)) {
               seen.add(key);
               rowKeys.push(key);
@@ -271,7 +316,9 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
       categoryMode = 'numeric';
       const set = new Set<number>();
       for (const pos of categoryPositions) {
-        model.series[pos]!.points.forEach((p, j) => set.add(numericX(p, j)));
+        model.series[pos]!.points.forEach((p, j) => {
+          set.add(numericX(p, j));
+        });
       }
       rowKeys = [...set].sort((a, b) => a - b);
     }
@@ -287,6 +334,27 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
           pieKeys.push(k);
         }
       });
+    }
+    // Doughnut rings share one category column: rings with different slice names get empty slices
+    // and the slice order follows the union of names.
+    const ringPositions = plan.groups.filter((g) => g.kind === 'doughnut').flatMap((g) => g.seriesIndices);
+    if (ringPositions.length > 1) {
+      const keyOf = (pos: number): string =>
+        [...new Set(pieKeysOf(model.series[pos]!))].sort().join(PIE_KEY_SEP + PIE_KEY_SEP);
+      const firstKeys = keyOf(ringPositions[0]!);
+      const differing = ringPositions.slice(1).find((pos) => keyOf(pos) !== firstKeys);
+      if (differing !== undefined) {
+        const s = model.series[differing]!;
+        diagnostics.push(
+          createDiagnostic(
+            'APPROXIMATED_LAYOUT',
+            'approximated',
+            `series[${s.index}].data`,
+            'Doughnut rings have different slice names; Excel rings share one category list, so each ring shows empty slices for names it lacks and the slice order follows the union of names.',
+            { seriesIndex: s.index, details: { categories: pieKeys.length } },
+          ),
+        );
+      }
     }
   }
 
@@ -312,31 +380,50 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
     };
   }
 
-  const nameRefOf = (col0: number, text: string): SeriesRange['nameRef'] => ({ formula: `${qSheet}!${cellRef(col0, 0)}`, cache: text });
+  const nameRefOf = (col0: number, text: string): SeriesRange['nameRef'] => ({
+    formula: `${qSheet}!${cellRef(col0, 0)}`,
+    cache: text,
+  });
   /** Rows 1..max(1,n): a chart reference always spans at least one cell. */
   const refTo = (n: number): number => Math.max(1, n);
   const padCache = <T>(cache: T[], n: number, fill: T): T[] => (cache.length === 0 && n === 0 ? [fill] : cache);
 
-  const valueFormatOf = (s: SeriesModel): string => (s.yFormat?.kind === 'excel' && s.yFormat.code ? s.yFormat.code : 'General');
-  const valueStyle = (code: string): CellStyleSpec | undefined => (code !== 'General' ? { numberFormat: code } : undefined);
+  const valueFormatOf = (s: SeriesModel): string =>
+    s.yFormat?.kind === 'excel' && s.yFormat.code && isValidExcelFormatCode(s.yFormat.code)
+      ? s.yFormat.code
+      : 'General';
+  const valueStyle = (code: string): CellStyleSpec | undefined =>
+    code !== 'General' ? { numberFormat: code } : undefined;
 
   const reportSeriesData = (s: SeriesModel, pos: number, nulls: number, nonNumeric: number, missing: number): void => {
     const path = `series[${s.index}].data`;
     if (nulls > 0) {
       diagnostics.push(
-        createDiagnostic('NULL_VALUES', 'translated', path, `${nulls} null values exported as empty cells (shown as gaps).`, {
-          severity: 'info',
-          seriesIndex: s.index,
-          details: { count: nulls },
-        }),
+        createDiagnostic(
+          'NULL_VALUES',
+          'translated',
+          path,
+          `${nulls} null values exported as empty cells (shown as gaps).`,
+          {
+            severity: 'info',
+            seriesIndex: s.index,
+            details: { count: nulls },
+          },
+        ),
       );
     }
     if (nonNumeric > 0) {
       diagnostics.push(
-        createDiagnostic('NON_NUMERIC_VALUE', 'approximated', path, `${nonNumeric} non-numeric values exported as empty cells.`, {
-          seriesIndex: s.index,
-          details: { count: nonNumeric },
-        }),
+        createDiagnostic(
+          'NON_NUMERIC_VALUE',
+          'approximated',
+          path,
+          `${nonNumeric} non-numeric values exported as empty cells.`,
+          {
+            seriesIndex: s.index,
+            details: { count: nonNumeric },
+          },
+        ),
       );
     }
     if (missing > 0) {
@@ -345,22 +432,31 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
           'UNALIGNED_X_VALUES',
           'approximated',
           path,
-          `Series has no value for ${missing} of the shared x values; those cells are left empty.`,
+          `Series has no point at ${missing} of the shared x values; those cells are written as #N/A so lines stay connected (as in the source chart).`,
           { severity: 'info', seriesIndex: s.index, details: { missing } },
         ),
       );
     }
     if (s.points.length === 0) {
       diagnostics.push(
-        createDiagnostic('EMPTY_SERIES', 'translated', path, 'Series has no data points.', { severity: 'info', seriesIndex: s.index }),
+        createDiagnostic('EMPTY_SERIES', 'translated', path, 'Series has no data points.', {
+          severity: 'info',
+          seriesIndex: s.index,
+        }),
       );
     }
     if (!s.visible) {
       diagnostics.push(
-        createDiagnostic('HIDDEN_SERIES_INCLUDED', 'approximated', `series[${s.index}].visible`, 'Hidden series is exported and appears visible in Excel.', {
-          severity: 'info',
-          seriesIndex: s.index,
-        }),
+        createDiagnostic(
+          'HIDDEN_SERIES_INCLUDED',
+          'approximated',
+          `series[${s.index}].visible`,
+          'Hidden series is exported and appears visible in Excel.',
+          {
+            severity: 'info',
+            seriesIndex: s.index,
+          },
+        ),
       );
     }
     void pos;
@@ -384,20 +480,37 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
   if (categoryPositions.length > 0) {
     const catCol = nextCol;
     const xTitle = xAxis0?.title?.text?.trim();
-    writeHeader(catCol, xTitle ? xTitle : isDatetime ? 'Date' : 'Category', xTitle ? 'xAxis[0].title.text' : 'xAxis[0].categories');
+    writeHeader(
+      catCol,
+      xTitle ? xTitle : isDatetime ? 'Date' : 'Category',
+      xTitle ? 'xAxis[0].title.text' : 'xAxis[0].categories',
+    );
     const n = rowKeys.length;
     const catCache: (string | number | null)[] = [];
-    const catIsStr = categoryMode !== 'numeric';
+    const catIsStr = categoryMode !== 'numeric' || pre1900;
     const catFormat = isDatetime ? (dateFormatCode ?? 'yyyy-mm-dd') : 'General';
+    const isoLabels = pre1900 ? isoDateText(rowKeys as number[]) : null;
     rowKeys.forEach((key, r) => {
       if (catIsStr) {
-        const label = cleanText(categoryMode === 'index' ? (categoryLabelByIndex.get(key as number) ?? String(key)) : String(key));
+        const label = cleanText(
+          isoLabels
+            ? isoLabels[r]!
+            : categoryMode === 'index'
+              ? (categoryLabelByIndex.get(key as number) ?? String(key))
+              : String(key),
+        );
         noteFormulaLike(label, 'xAxis[0].categories');
         builder.set(catCol, r + 1, { type: 'string', value: label });
         catCache.push(label);
       } else {
         const v = isDatetime ? msToExcelSerial(key as number) : (key as number);
-        builder.set(catCol, r + 1, { type: 'number', value: v }, isDatetime ? { numberFormat: catFormat } : undefined, isDatetime ? catFormat.length + 2 : undefined);
+        builder.set(
+          catCol,
+          r + 1,
+          { type: 'number', value: v },
+          isDatetime ? { numberFormat: catFormat } : undefined,
+          isDatetime ? catFormat.length + 2 : undefined,
+        );
         catCache.push(v);
       }
     });
@@ -410,7 +523,9 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
     nextCol++;
 
     const rowOfKey = new Map<string | number, number>();
-    rowKeys.forEach((k, r) => rowOfKey.set(k, r));
+    rowKeys.forEach((k, r) => {
+      rowOfKey.set(k, r);
+    });
 
     for (const pos of categoryPositions) {
       const s = model.series[pos]!;
@@ -423,11 +538,29 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
       const pointOffsets: number[] = [];
       const counters = { nulls: 0, nonNumeric: 0 };
       const cats = (model.xAxes[s.xAxisIndex] ?? xAxis0)?.categories ?? null;
+      const offCategory: string[] = [];
+      let firstOffCategory = -1;
+      let duplicates = 0;
+      let firstDuplicate = -1;
       s.points.forEach((p, j) => {
-        const key =
-          categoryMode === 'label' ? categoryLabel(p, j, cats) : categoryMode === 'index' ? (p.x as number) : numericX(p, j);
+        let key: string | number;
+        if (categoryMode === 'label') {
+          const lab = categoryLabel(p, j, cats);
+          key = lab.key;
+          if (lab.offCategory) {
+            if (firstOffCategory < 0) firstOffCategory = j;
+            if (offCategory.length < 10) offCategory.push(lab.key);
+          }
+        } else {
+          key = categoryMode === 'index' ? (p.x as number) : numericX(p, j);
+        }
         const r = rowOfKey.get(key);
         if (r === undefined || filled[r] === 1) {
+          // Two points of one series at the same x: Excel has one cell per x, the first point wins.
+          if (r !== undefined) {
+            duplicates++;
+            if (firstDuplicate < 0) firstDuplicate = j;
+          }
           pointOffsets.push(-1);
           return;
         }
@@ -438,8 +571,36 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
         if (v !== null) builder.set(col, r + 1, { type: 'number', value: v }, style);
       });
       let missing = 0;
-      for (let r = 0; r < n; r++) if (filled[r] === 0) missing++;
+      for (let r = 0; r < n; r++) {
+        if (filled[r] === 1) continue;
+        missing++;
+        // No point at this x (alignment gap, not a null point): #N/A, which line/area charts skip
+        // while connecting the neighbours. The chart cache keeps null for it.
+        builder.set(col, r + 1, { type: 'error', value: '#N/A' });
+      }
       reportSeriesData(s, pos, counters.nulls, counters.nonNumeric, missing);
+      if (firstOffCategory >= 0) {
+        diagnostics.push(
+          createDiagnostic(
+            'UNALIGNED_X_VALUES',
+            'approximated',
+            `series[${s.index}].data[${firstOffCategory}].x`,
+            `Points at x = ${offCategory.join(', ')} do not fall on a category of the x axis; each such x is written as its own category row.`,
+            { seriesIndex: s.index, details: { xs: offCategory } },
+          ),
+        );
+      }
+      if (duplicates > 0) {
+        diagnostics.push(
+          createDiagnostic(
+            'UNALIGNED_X_VALUES',
+            'approximated',
+            `series[${s.index}].data[${firstDuplicate}]`,
+            `${duplicates} point(s) repeat an x value already used by this series; Excel holds one value per x, so the first point is kept and the repeats are not exported to the chart.`,
+            { seriesIndex: s.index, details: { duplicates } },
+          ),
+        );
+      }
       const lim = checkLimits(0, 0, n, s.index);
       diagnostics.push(...lim.diagnostics);
       ranges.push({
@@ -467,7 +628,9 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
       catCache.push(label);
     });
     const rowOfKey = new Map<string, number>();
-    pieKeys.forEach((k, r) => rowOfKey.set(k, r));
+    pieKeys.forEach((k, r) => {
+      rowOfKey.set(k, r);
+    });
     for (const pos of piePositions) {
       const s = model.series[pos]!;
       const col = nextCol++;
@@ -489,7 +652,11 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
       ranges.push({
         seriesIndex: pos,
         nameRef: nameRefOf(col, name),
-        categories: { formula: rangeRef(sheetName, catCol, 1, refTo(n)), kind: 'str', cache: padCache(catCache.slice() as (string | null)[], n, null) },
+        categories: {
+          formula: rangeRef(sheetName, catCol, 1, refTo(n)),
+          kind: 'str',
+          cache: padCache(catCache.slice() as (string | null)[], n, null),
+        },
         values: { formula: rangeRef(sheetName, col, 1, refTo(n)), cache: padCache(cache, n, null), formatCode },
         bubbleSizes: null,
         pointOffsets,
@@ -522,9 +689,16 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
       const r = j + 1;
       pointOffsets.push(j);
       const rawX = numericX(p, j);
-      const x = isDatetime ? msToExcelSerial(rawX) : rawX;
+      // Pre-1900 datetime x: plain (possibly negative) day numbers, no date format.
+      const x = isDatetime || pre1900 ? msToExcelSerial(rawX) : rawX;
       xs.push(x);
-      builder.set(xCol, r, { type: 'number', value: x }, isDatetime ? { numberFormat: xFormat } : undefined, isDatetime ? xFormat.length + 2 : undefined);
+      builder.set(
+        xCol,
+        r,
+        { type: 'number', value: x },
+        isDatetime ? { numberFormat: xFormat } : undefined,
+        isDatetime ? xFormat.length + 2 : undefined,
+      );
       const y = yValue(p, counters);
       ys.push(y);
       if (y !== null) builder.set(yCol, r, { type: 'number', value: y }, style);
@@ -549,7 +723,9 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
       literalName: base,
       categories,
       values: { formula: rangeRef(sheetName, yCol, 1, refTo(n)), cache: padCache(ys, n, null), formatCode },
-      bubbleSizes: isBubble ? { formula: rangeRef(sheetName, zCol, 1, refTo(n)), cache: padCache(zs, n, null), formatCode: 'General' } : null,
+      bubbleSizes: isBubble
+        ? { formula: rangeRef(sheetName, zCol, 1, refTo(n)), cache: padCache(zs, n, null), formatCode: 'General' }
+        : null,
       pointOffsets,
     });
   }
@@ -581,11 +757,32 @@ function numericX(p: PointModel, j: number): number {
   return p.x !== null && Number.isFinite(p.x) ? p.x : j;
 }
 
-function categoryLabel(p: PointModel, j: number, cats: string[] | null): string {
-  if (p.x !== null && Number.isInteger(p.x) && cats && p.x >= 0 && p.x < cats.length) return cats[p.x]!;
-  if (p.name !== null && p.name !== '') return p.name;
-  if (cats && j < cats.length) return cats[j]!;
-  return String(p.x ?? j);
+/**
+ * Row label of a point on a category axis in label mode. A numeric x is the point's position on the
+ * axis, so it is never replaced by `cats[j]` (its array position): it maps to the category at index x
+ * when that exists, else (named point on an axis without that category) to its name, else to `String(x)`
+ * as its own row (`offCategory`). Only points without x fall back to their name or position.
+ */
+function categoryLabel(p: PointModel, j: number, cats: string[] | null): { key: string; offCategory: boolean } {
+  const named = p.name !== null && p.name !== '';
+  if (p.x !== null && Number.isFinite(p.x)) {
+    const isIndex = Number.isInteger(p.x) && p.x >= 0;
+    if (isIndex && cats && p.x < cats.length) return { key: cats[p.x]!, offCategory: false };
+    if (isIndex && named) return { key: p.name!, offCategory: false };
+    return { key: String(p.x), offCategory: true };
+  }
+  if (named) return { key: p.name!, offCategory: false };
+  if (cats && j < cats.length) return { key: cats[j]!, offCategory: false };
+  return { key: String(j), offCategory: false };
+}
+
+/** ISO text for ms timestamps: date only when every value is at midnight UTC. */
+function isoDateText(ms: readonly number[]): string[] {
+  const dayOnly = ms.every((v) => ((v % 86_400_000) + 86_400_000) % 86_400_000 === 0);
+  return ms.map((v) => {
+    const iso = new Date(v).toISOString();
+    return dayOnly ? iso.slice(0, iso.indexOf('T')) : iso.slice(0, iso.indexOf('.')).replace('T', ' ');
+  });
 }
 
 const PIE_KEY_SEP = '\u0000';

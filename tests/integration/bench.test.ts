@@ -56,7 +56,10 @@ function options(c: BenchCase): Options {
     series: Array.from({ length: c.series }, (_, s) => ({
       type: 'line' as const,
       name: `S${s + 1}`,
-      data: Array.from({ length: c.pointsPerSeries }, (_, i) => Math.round((Math.sin((i + s * 13) / 40) * 50 + 100) * 100) / 100),
+      data: Array.from(
+        { length: c.pointsPerSeries },
+        (_, i) => Math.round((Math.sin((i + s * 13) / 40) * 50 + 100) * 100) / 100,
+      ),
     })),
   };
 }
@@ -69,8 +72,10 @@ const round = (n: number, d = 1): number => Math.round(n * 10 ** d) / 10 ** d;
 const gc = (globalThis as { gc?: () => void }).gc;
 
 const rows: BenchRow[] = [];
+const BENCH_ENABLED = process.env.BENCH === '1';
+if (!BENCH_ENABLED) console.info('[bench] skipped: set BENCH=1 (or run `pnpm bench`) to run the export benchmark');
 
-describe.skipIf(!process.env.BENCH)('export benchmark (BENCH=1)', () => {
+describe.skipIf(!BENCH_ENABLED)('export benchmark (BENCH=1)', () => {
   afterEach(() => destroyAll());
 
   afterAll(() => {
@@ -94,43 +99,55 @@ describe.skipIf(!process.env.BENCH)('export benchmark (BENCH=1)', () => {
     );
   });
 
-  it.each(CASES.map((c) => [c.label, c] as const))('%s', async (_l, c) => {
-    // Warm-up (JIT) on the same chart shape, not recorded.
-    {
-      const chart = renderChart(H, options(c));
-      await exportHighchartsToXlsx(chart);
-      destroyAll();
-    }
-    const samples: Array<{ extractMs: number; translateMs: number; writeMs: number; totalMs: number; bytes: number; heap: number; warn: boolean }> = [];
-    for (let r = 0; r < RUNS; r++) {
-      const chart = renderChart(H, options(c));
-      gc?.();
-      const heap0 = process.memoryUsage().heapUsed;
-      const result = await exportHighchartsToXlsx(chart);
-      const heap1 = process.memoryUsage().heapUsed;
-      destroyAll();
-      expect(result.report.editable).toBe(true);
-      samples.push({
-        ...result.timings,
-        bytes: result.bytes.byteLength,
-        heap: heap1 - heap0,
-        warn: result.warnings.some((w) => w.code === 'ROW_LIMIT_EXCEEDED'),
+  it.each(CASES.map((c) => [c.label, c] as const))(
+    '%s',
+    async (_l, c) => {
+      // Warm-up (JIT) on the same chart shape, not recorded.
+      {
+        const chart = renderChart(H, options(c));
+        await exportHighchartsToXlsx(chart);
+        destroyAll();
+      }
+      const samples: Array<{
+        extractMs: number;
+        translateMs: number;
+        writeMs: number;
+        totalMs: number;
+        bytes: number;
+        heap: number;
+        warn: boolean;
+      }> = [];
+      for (let r = 0; r < RUNS; r++) {
+        const chart = renderChart(H, options(c));
+        gc?.();
+        const heap0 = process.memoryUsage().heapUsed;
+        const result = await exportHighchartsToXlsx(chart);
+        const heap1 = process.memoryUsage().heapUsed;
+        destroyAll();
+        expect(result.report.editable).toBe(true);
+        samples.push({
+          ...result.timings,
+          bytes: result.bytes.byteLength,
+          heap: heap1 - heap0,
+          warn: result.warnings.some((w) => w.code === 'ROW_LIMIT_EXCEEDED'),
+        });
+      }
+      rows.push({
+        label: c.label,
+        totalPoints: c.series * c.pointsPerSeries,
+        series: c.series,
+        pointsPerSeries: c.pointsPerSeries,
+        extractMs: round(median(samples.map((s) => s.extractMs))),
+        translateMs: round(median(samples.map((s) => s.translateMs))),
+        writeMs: round(median(samples.map((s) => s.writeMs))),
+        totalMs: round(median(samples.map((s) => s.totalMs))),
+        bytes: median(samples.map((s) => s.bytes)),
+        heapDeltaMB: round(median(samples.map((s) => s.heap)) / (1024 * 1024), 2),
+        rowLimitWarning: samples.some((s) => s.warn),
+        runs: RUNS,
       });
-    }
-    rows.push({
-      label: c.label,
-      totalPoints: c.series * c.pointsPerSeries,
-      series: c.series,
-      pointsPerSeries: c.pointsPerSeries,
-      extractMs: round(median(samples.map((s) => s.extractMs))),
-      translateMs: round(median(samples.map((s) => s.translateMs))),
-      writeMs: round(median(samples.map((s) => s.writeMs))),
-      totalMs: round(median(samples.map((s) => s.totalMs))),
-      bytes: median(samples.map((s) => s.bytes)),
-      heapDeltaMB: round(median(samples.map((s) => s.heap)) / (1024 * 1024), 2),
-      rowLimitWarning: samples.some((s) => s.warn),
-      runs: RUNS,
-    });
-    expect(samples.some((s) => s.warn)).toBe(c.pointsPerSeries > EXCEL_MAX_POINTS_PER_SERIES);
-  }, 120_000);
+      expect(samples.some((s) => s.warn)).toBe(c.pointsPerSeries > EXCEL_MAX_POINTS_PER_SERIES);
+    },
+    120_000,
+  );
 });

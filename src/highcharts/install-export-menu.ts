@@ -40,6 +40,12 @@ const FALLBACK_MENU_ITEMS: readonly string[] = Object.freeze([
 const DEFAULT_ANCHORS: readonly string[] = ['downloadXLS', 'downloadCSV', 'downloadSVG'];
 
 const installations = new WeakMap<object, Installation>();
+/** Charts with an export started from the menu and not finished yet (double-click guard). */
+const inFlight = new WeakSet<object>();
+
+function logError(message: string, error: unknown): void {
+  console.error(`[highcharts-editable-excel] ${message}`, error);
+}
 
 function isRec(x: unknown): x is Rec {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -57,7 +63,12 @@ function recAt(x: unknown, ...path: string[]): Rec | undefined {
 function isHighchartsNamespace(x: unknown): x is HighchartsNamespaceLike {
   if ((typeof x !== 'object' && typeof x !== 'function') || x === null) return false;
   const h = x as Rec;
-  return typeof h.getOptions === 'function' && typeof h.setOptions === 'function' && typeof h.addEvent === 'function' && typeof h.Chart === 'function';
+  return (
+    typeof h.getOptions === 'function' &&
+    typeof h.setOptions === 'function' &&
+    typeof h.addEvent === 'function' &&
+    typeof h.Chart === 'function'
+  );
 }
 
 function hasExportingModule(H: HighchartsNamespaceLike): boolean {
@@ -103,34 +114,70 @@ function readPerChartConfig(chart: unknown): PerChartExportConfig | undefined {
 }
 
 /** Builds the menu item definition; its `onclick` runs with `this` = the chart. */
-function createMenuItemDefinition(options: InstallOptions, text: string): { text: string; onclick: (this: unknown) => void } {
+function createMenuItemDefinition(
+  options: InstallOptions,
+  text: string,
+): { text: string; onclick: (this: unknown) => void } {
   return {
     text,
     onclick(this: unknown): void {
-      const chart = this;
-      const merged: ExportOptions = { ...(options.exportOptions ?? {}), ...perChartExportOptions(readPerChartConfig(chart)) };
-      const onError =
-        options.onError ??
-        ((error: unknown): void => {
-          console.error('[highcharts-editable-excel] Export failed:', error);
-        });
-      let pending: Promise<unknown>;
+      const key = typeof this === 'object' && this !== null ? this : null;
+      // A second click while this chart's export is still running is ignored.
+      if (key !== null && inFlight.has(key)) return;
+      const merged: ExportOptions = {
+        ...(options.exportOptions ?? {}),
+        ...perChartExportOptions(readPerChartConfig(this)),
+      };
+      // Neither callback may produce an unhandled rejection: a throwing onExport goes to onError,
+      // a throwing onError is logged.
+      const handleError = (error: unknown): void => {
+        if (!options.onError) {
+          logError('Export failed:', error);
+          return;
+        }
+        try {
+          options.onError(error, this);
+        } catch (callbackError) {
+          logError('onError threw:', callbackError);
+        }
+      };
+      let pending: Promise<Awaited<ReturnType<typeof downloadHighchartsAsXlsx>>>;
       try {
-        pending = downloadHighchartsAsXlsx(chart, merged);
+        pending = downloadHighchartsAsXlsx(this, merged);
       } catch (error) {
-        onError(error, chart);
+        handleError(error);
         return;
       }
-      pending.then(
-        (result) => options.onExport?.(result as Awaited<ReturnType<typeof downloadHighchartsAsXlsx>>, chart),
-        (error: unknown) => onError(error, chart),
-      );
+      if (key !== null) inFlight.add(key);
+      pending
+        .then((result) => options.onExport?.(result, this))
+        .catch(handleError)
+        .finally(() => {
+          if (key !== null) inFlight.delete(key);
+        });
     },
   };
 }
 
-/** Rewrites the chart's user options (before Highcharts merges them) for per-chart settings. */
-function applyPerChartUserOptions(H: HighchartsNamespaceLike, userOptions: Rec, key: string, insertAfter: string | undefined): void {
+/**
+ * Applies the per-chart settings (`exporting.editableExcel`, explicit `menuItems`) to a chart that
+ * has just merged its options (Chart 'afterInit', before the first render). Only objects owned by
+ * the chart are replaced: `chart.userOptions` (Highcharts' shallow copy) and `chart.options`
+ * (the merged result). The caller's options object, possibly frozen or reused for several charts,
+ * is never assigned into.
+ *
+ * (The Chart 'init' event cannot do this without mutation: Highcharts' module code is strict, so
+ * replacing `e.args[0]` does not change the options the chart merges.)
+ */
+function applyPerChartOptions(
+  H: HighchartsNamespaceLike,
+  chart: Rec,
+  key: string,
+  insertAfter: string | undefined,
+): void {
+  const userOptions = isRec(chart.userOptions) ? chart.userOptions : undefined;
+  const merged = isRec(chart.options) ? chart.options : undefined;
+  if (!userOptions || !merged) return;
   const exporting = recAt(userOptions, 'exporting');
   const config = recAt(exporting, 'editableExcel') as PerChartExportConfig | undefined;
   const ownItems = menuItemsOf(userOptions);
@@ -147,18 +194,51 @@ function applyPerChartUserOptions(H: HighchartsNamespaceLike, userOptions: Rec, 
   if (newItems === undefined && menuText === undefined) return;
 
   // Shallow copies all the way down: the caller's nested objects and arrays are never edited.
-  const nextExporting: Rec = { ...(exporting ?? {}) };
-  if (newItems !== undefined) {
-    const buttons = recAt(exporting, 'buttons');
-    const contextButton = recAt(buttons, 'contextButton');
-    nextExporting.buttons = { ...(buttons ?? {}), contextButton: { ...(contextButton ?? {}), menuItems: newItems } };
+  const withSettings = (base: Rec | undefined, defsFallback: Rec | undefined): Rec => {
+    const next: Rec = { ...(base ?? {}) };
+    if (newItems !== undefined) {
+      const buttons = recAt(base, 'buttons');
+      const contextButton = recAt(buttons, 'contextButton');
+      next.buttons = { ...(buttons ?? {}), contextButton: { ...(contextButton ?? {}), menuItems: newItems } };
+    }
+    if (menuText !== undefined && !disabled) {
+      const defs = recAt(base, 'menuItemDefinitions');
+      const def = recAt(defs, key) ?? recAt(defsFallback, key) ?? {};
+      next.menuItemDefinitions = { ...(defs ?? {}), [key]: { ...def, text: menuText } };
+    }
+    return next;
+  };
+  const globalDefs = recAt(H.getOptions(), 'exporting', 'menuItemDefinitions');
+  chart.userOptions = { ...userOptions, exporting: withSettings(exporting, globalDefs) };
+
+  // The merged `chart.options.exporting` object is chart-owned and already referenced by the
+  // exporting module (`chart.exporting.options`, and the context button copies `menuItems` when it
+  // renders), so it must be updated IN PLACE: assign new arrays/objects onto it rather than
+  // replacing it. The caller's arrays are still never edited (a new `menuItems` array is assigned).
+  const mergedExporting = recAt(merged, 'exporting');
+  const updated = withSettings(mergedExporting, globalDefs);
+  if (mergedExporting) {
+    if (newItems !== undefined) {
+      let buttons = recAt(mergedExporting, 'buttons');
+      if (!buttons) {
+        buttons = {};
+        mergedExporting.buttons = buttons;
+      }
+      let contextButton = recAt(buttons, 'contextButton');
+      if (!contextButton) {
+        contextButton = {};
+        buttons.contextButton = contextButton;
+      }
+      contextButton.menuItems = newItems;
+    }
+    if (updated.menuItemDefinitions !== undefined) mergedExporting.menuItemDefinitions = updated.menuItemDefinitions;
+  } else {
+    merged.exporting = updated;
   }
-  if (menuText !== undefined && !disabled) {
-    const globalDef = recAt(H.getOptions(), 'exporting', 'menuItemDefinitions', key) ?? {};
-    const defs = recAt(exporting, 'menuItemDefinitions');
-    nextExporting.menuItemDefinitions = { ...(defs ?? {}), [key]: { ...globalDef, ...(recAt(defs, key) ?? {}), text: menuText } };
+  const exportingInstance = recAt(chart, 'exporting');
+  if (exportingInstance && exportingInstance.options !== recAt(merged, 'exporting')) {
+    exportingInstance.options = recAt(merged, 'exporting');
   }
-  userOptions.exporting = nextExporting;
 }
 
 /**
@@ -168,6 +248,12 @@ function applyPerChartUserOptions(H: HighchartsNamespaceLike, userOptions: Rec, 
  *
  * Per chart, `exporting.editableExcel` (PerChartExportConfig) can disable the item
  * (`enabled: false`), change its text (`menuText`) or override export options.
+ *
+ * Per-chart `exporting.editableExcel.enabled` / `menuText` and explicit `menuItems` are applied
+ * when the chart is CREATED. After `chart.update({ exporting: … })` that changes them, call
+ * `addEditableExcelMenuItem(chart)` again (export options in `editableExcel` are read on every
+ * click and need nothing). The caller's options object is never modified, so frozen or shared
+ * option objects are fine.
  *
  * @throws ExportError INVALID_OPTIONS when `Highcharts` is not a Highcharts namespace;
  *   EXPORTING_MODULE_MISSING when the exporting module is not loaded.
@@ -201,15 +287,15 @@ export function installHighchartsExcelExport(Highcharts: unknown, options: Insta
   const baseItems = originalItems ?? FALLBACK_MENU_ITEMS;
   const addedToMenu = !baseItems.includes(key);
   if (addedToMenu) {
-    H.setOptions({ exporting: { buttons: { contextButton: { menuItems: insertMenuItem(baseItems, key, options.insertAfter) } } } });
+    H.setOptions({
+      exporting: { buttons: { contextButton: { menuItems: insertMenuItem(baseItems, key, options.insertAfter) } } },
+    });
   }
 
-  // 3. Per-chart options. Highcharts fires Chart 'init' with { args: [userOptions, callback] }
-  //    before merging the user options with the defaults.
-  const unbind = H.addEvent(H.Chart, 'init', function onChartInit(e: unknown): void {
-    const args = (e as { args?: ArrayLike<unknown> } | undefined)?.args;
-    const userOptions = args?.[0];
-    if (isRec(userOptions)) applyPerChartUserOptions(H, userOptions, key, options.insertAfter);
+  // 3. Per-chart options. Chart 'afterInit' fires after `chart.options`/`chart.userOptions` are set
+  //    and before the first render (which draws the exporting button).
+  const unbind = H.addEvent(H.Chart, 'afterInit', function onChartAfterInit(this: unknown): void {
+    if (isRec(this)) applyPerChartOptions(H, this, key, options.insertAfter);
   });
 
   let installed = true;

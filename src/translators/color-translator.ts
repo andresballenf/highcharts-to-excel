@@ -32,9 +32,15 @@ export function toFill(
     if (color) return { fill: { type: 'solid', color } };
     return {
       fill: null,
-      diagnostic: createDiagnostic('UNRESOLVED_COLOR', 'approximated', property, `Could not resolve color "${input}"; Excel's automatic color is used.`, {
-        details: { value: input },
-      }),
+      diagnostic: createDiagnostic(
+        'UNRESOLVED_COLOR',
+        'approximated',
+        property,
+        `Could not resolve color "${input}"; Excel's automatic color is used.`,
+        {
+          details: { value: input },
+        },
+      ),
     };
   }
 
@@ -48,9 +54,15 @@ export function toFill(
 
   return {
     fill: null,
-    diagnostic: createDiagnostic('UNRESOLVED_COLOR', 'unsupported', property, 'Color option is neither a color string nor a gradient (patterns are not supported).', {
-      details: { valueType: typeof input },
-    }),
+    diagnostic: createDiagnostic(
+      'UNRESOLVED_COLOR',
+      'unsupported',
+      property,
+      'Color option is neither a color string nor a gradient (patterns are not supported).',
+      {
+        details: { valueType: typeof input },
+      },
+    ),
   };
 }
 
@@ -82,9 +94,15 @@ function gradientToFill(
   if (stops.length === 0) {
     return {
       fill: null,
-      diagnostic: createDiagnostic('UNRESOLVED_COLOR', 'approximated', `${property}.stops`, 'No gradient stop color could be resolved.', {
-        details: { stops: unresolved },
-      }),
+      diagnostic: createDiagnostic(
+        'UNRESOLVED_COLOR',
+        'approximated',
+        `${property}.stops`,
+        'No gradient stop color could be resolved.',
+        {
+          details: { stops: unresolved },
+        },
+      ),
     };
   }
 
@@ -105,9 +123,15 @@ function gradientToFill(
   if (unresolved.length > 0) {
     return {
       fill,
-      diagnostic: createDiagnostic('UNRESOLVED_COLOR', 'approximated', `${property}.stops`, 'Some gradient stop colors could not be resolved and were dropped.', {
-        details: { stops: unresolved },
-      }),
+      diagnostic: createDiagnostic(
+        'UNRESOLVED_COLOR',
+        'approximated',
+        `${property}.stops`,
+        'Some gradient stop colors could not be resolved and were dropped.',
+        {
+          details: { stops: unresolved },
+        },
+      ),
     };
   }
   return { fill };
@@ -121,7 +145,7 @@ function linearAngle(lg: GradientLike['linearGradient']): number {
   const dy = num(y2) - num(y1);
   if (dx === 0 && dy === 0) return 0;
   const deg = (Math.atan2(dy, dx) * 180) / Math.PI;
-  return Math.round(((deg % 360) + 360) % 360 * 1000) / 1000;
+  return Math.round((((deg % 360) + 360) % 360) * 1000) / 1000;
 }
 
 function num(v: unknown): number {

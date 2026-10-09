@@ -19,5 +19,15 @@
     "types": ["node"],
     "paths": { "highcharts-editable-excel": ["./src/index.ts"] }
   },
-  "include": ["src", "tests", "e2e", "demo/src", "scripts", "vitest.config.ts", "tsup.config.ts", "playwright.config.ts", "vite.config.ts"]
+  "include": [
+    "src",
+    "tests",
+    "e2e",
+    "demo/src",
+    "scripts",
+    "vitest.config.ts",
+    "tsup.config.ts",
+    "playwright.config.ts",
+    "demo/vite.config.ts"
+  ]
 }

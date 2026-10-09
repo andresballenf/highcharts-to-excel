@@ -8,19 +8,33 @@ export const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone=
  * Characters that may not appear in an XML 1.0 document: C0 controls other than TAB/LF/CR,
  * U+FFFE/U+FFFF and unpaired surrogates.
  */
-// eslint-disable-next-line no-control-regex
-const ILLEGAL_XML_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const ILLEGAL_XML_CHARS =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: XML 1.0 forbids these code points; the regex must name them
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
 export function stripIllegalXmlChars(text: string): string {
   return text.replace(ILLEGAL_XML_CHARS, '');
 }
 
-/** Escape text content. Strips characters that are illegal in XML 1.0 (TAB/LF/CR are kept). */
+/**
+ * Escape text content. Strips characters that are illegal in XML 1.0; TAB/LF are kept and CR is
+ * encoded as `&#13;` so XML end-of-line normalisation does not turn it into LF.
+ */
 export function escapeXml(text: string): string {
   return stripIllegalXmlChars(String(text))
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/\r/g, '&#13;');
+}
+
+/**
+ * Escape text for an ST_Xstring context (cell `<t>`, chart `c:v`): Excel decodes `_xHHHH_` there as
+ * the character U+HHHH, so a literal `_x` that starts such a sequence is written as `_x005F_x`.
+ * Not for DrawingML `a:t` (plain xsd:string).
+ */
+export function escapeXstring(text: string): string {
+  return escapeXml(String(text).replace(/_(x[0-9A-Fa-f]{4}_)/g, '_x005F_$1'));
 }
 
 /** Escape an attribute value (double-quoted). Whitespace control chars are encoded so they survive normalisation. */

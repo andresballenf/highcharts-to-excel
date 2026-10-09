@@ -12,13 +12,16 @@ import { arr, num, plainText, rec, str } from './guards';
 import type { AxisView, ChartView, ExtractContext, HcAxisLike } from './types';
 
 /** Navigator / scrollbar / other internal axes (Highcharts Stock). */
-export function isInternalAxis(axis: HcAxisLike | Record<string, unknown> | undefined, opts?: Record<string, unknown>): boolean {
+export function isInternalAxis(
+  axis: HcAxisLike | Record<string, unknown> | undefined,
+  opts?: Record<string, unknown>,
+): boolean {
   if (!axis) return true;
   const a = axis as HcAxisLike;
   const o = opts ?? rec(a.options) ?? {};
   if (a.isInternal === true || o.isInternal === true) return true;
   const cls = str(o.className);
-  if (cls !== undefined && cls.includes('navigator')) return true;
+  if (cls?.includes('navigator')) return true;
   return a.coll === 'navigatorXAxis';
 }
 
@@ -33,7 +36,10 @@ export function axisKind(view: AxisView): AxisKind {
 
 /** Explicit categories (or, for `type: 'category'`, the point names Highcharts collected). */
 export function axisCategories(view: AxisView): string[] | null {
-  const list = arr(view.rt?.categories) ?? arr(view.opts.categories) ?? (view.opts.type === 'category' ? arr(view.rt?.names) : undefined);
+  const list =
+    arr(view.rt?.categories) ??
+    arr(view.opts.categories) ??
+    (view.opts.type === 'category' ? arr(view.rt?.names) : undefined);
   if (!list || list.length === 0) return null;
   return list.map((c) => plainText(c) ?? (c === null || c === undefined ? '' : String(c)));
 }
@@ -56,9 +62,19 @@ function axisTitle(view: ChartView, axis: AxisView): TextBlock | null {
   return { text, font: fontFor(view, 'axisTitle', t.style), align, verticalAlign: 'middle' };
 }
 
-function lineStroke(view: ChartView, color: unknown, width: unknown, defaults: { color: string; width: number }, dashStyle?: unknown): Stroke {
+function lineStroke(
+  view: ChartView,
+  color: unknown,
+  width: unknown,
+  defaults: { color: string; width: number },
+  dashStyle?: unknown,
+): Stroke {
   const w = num(width) ?? defaults.width;
-  return strokeFromOptions({ color, width: w, dashStyle }, { color: parseColor(defaults.color, view.resolver), width: w, dash: 'solid' }, view.resolver);
+  return strokeFromOptions(
+    { color, width: w, dashStyle },
+    { color: parseColor(defaults.color, view.resolver), width: w, dash: 'solid' },
+    view.resolver,
+  );
 }
 
 function extractAxis(ctx: ExtractContext, axis: AxisView): AxisModel {
@@ -76,18 +92,30 @@ function extractAxis(ctx: ExtractContext, axis: AxisView): AxisModel {
   });
   diagnostics.addAll(translated.diagnostics);
 
-  let min = num(o.min) ?? null;
-  let max = num(o.max) ?? null;
+  // Datetime x bounds move to the displayed wall-clock time, like the point x values. Date strings
+  // (Highcharts 12+) are already wall-clock times.
+  const datetimeX = isX && kind === 'datetime';
+  const toWall = (v: number | null): number | null => (v === null || !datetimeX ? v : ctx.time.bound(v));
+  const optionBound = (v: unknown): number | null =>
+    datetimeX && typeof v === 'string' ? (ctx.time.parse(v, false) ?? null) : toWall(num(v) ?? null);
+  let min = optionBound(o.min);
+  let max = optionBound(o.max);
   const userMin = num(axis.rt?.userMin);
   const userMax = num(axis.rt?.userMax);
   if ((min === null && userMin !== undefined) || (max === null && userMax !== undefined)) {
     // The user zoomed: export the window they are looking at.
-    if (min === null && userMin !== undefined) min = userMin;
-    if (max === null && userMax !== undefined) max = userMax;
-    diagnostics.report('APPROXIMATED_AXIS_SCALE', 'approximated', `${axis.path}.min`, 'The chart is zoomed; the zoomed range is exported as fixed axis bounds.', {
-      severity: 'info',
-      details: { min, max },
-    });
+    if (min === null && userMin !== undefined) min = toWall(userMin);
+    if (max === null && userMax !== undefined) max = toWall(userMax);
+    diagnostics.report(
+      'APPROXIMATED_AXIS_SCALE',
+      'approximated',
+      `${axis.path}.min`,
+      'The chart is zoomed; the zoomed range is exported as fixed axis bounds.',
+      {
+        severity: 'info',
+        details: { min, max },
+      },
+    );
   }
 
   let dataMin: number | null = null;
@@ -103,9 +131,15 @@ function extractAxis(ctx: ExtractContext, axis: AxisView): AxisModel {
   for (const key of ['plotBands', 'plotLines'] as const) {
     const list = arr(o[key]);
     if (list && list.length > 0) {
-      diagnostics.report('UNSUPPORTED_PLOT_BAND', 'unsupported', `${axis.path}.${key}`, `Axis ${key} have no Excel chart equivalent and are omitted.`, {
-        details: { count: list.length },
-      });
+      diagnostics.report(
+        'UNSUPPORTED_PLOT_BAND',
+        'unsupported',
+        `${axis.path}.${key}`,
+        `Axis ${key} have no Excel chart equivalent and are omitted.`,
+        {
+          details: { count: list.length },
+        },
+      );
     }
   }
 
@@ -113,7 +147,10 @@ function extractAxis(ctx: ExtractContext, axis: AxisView): AxisModel {
   const minorEnabled = o.minorTicks === true || (o.minorTickInterval !== undefined && o.minorTickInterval !== null);
   const minorWidth = num(o.minorGridLineWidth) ?? 1;
 
-  const reversed = typeof axis.rt?.reversed === 'boolean' ? axis.rt.reversed : o.reversed === true || (isX && view.inverted && o.reversed === undefined);
+  const reversed =
+    typeof axis.rt?.reversed === 'boolean'
+      ? axis.rt.reversed
+      : o.reversed === true || (isX && view.inverted && o.reversed === undefined);
   const opposite = typeof axis.rt?.opposite === 'boolean' ? axis.rt.opposite : o.opposite === true;
 
   return {
@@ -130,14 +167,17 @@ function extractAxis(ctx: ExtractContext, axis: AxisView): AxisModel {
     },
     min,
     max,
-    dataMin,
-    dataMax,
+    dataMin: toWall(dataMin),
+    dataMax: toWall(dataMax),
     tickInterval: num(o.tickInterval) ?? null,
     minorTickInterval: num(o.minorTickInterval) ?? null,
     reversed,
     opposite,
     visible: o.visible !== false,
-    gridLines: gridWidth > 0 ? borderStroke(view, o.gridLineColor, gridWidth, { color: '#e6e6e6', width: 1 }, o.gridLineDashStyle) : null,
+    gridLines:
+      gridWidth > 0
+        ? borderStroke(view, o.gridLineColor, gridWidth, { color: '#e6e6e6', width: 1 }, o.gridLineDashStyle)
+        : null,
     minorGridLines:
       minorEnabled && minorWidth > 0
         ? borderStroke(view, o.minorGridLineColor, minorWidth, { color: '#f2f2f2', width: 1 }, o.minorGridLineDashStyle)

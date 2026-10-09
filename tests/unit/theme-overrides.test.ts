@@ -33,7 +33,10 @@ describe('applyThemeOverrides', () => {
   it('sets chart and plot backgrounds', () => {
     const out = applyThemeOverrides(F.lineModel(), { chartBackground: '#000000', plotBackground: 'white' });
     expect(out.background).toEqual({ type: 'solid', color: expect.objectContaining({ r: 0, g: 0, b: 0, a: 1 }) });
-    expect(out.plotArea.background).toEqual({ type: 'solid', color: expect.objectContaining({ r: 255, g: 255, b: 255 }) });
+    expect(out.plotArea.background).toEqual({
+      type: 'solid',
+      color: expect.objectContaining({ r: 255, g: 255, b: 255 }),
+    });
   });
 
   it('applies fontFamily everywhere and merges component font overrides', () => {
@@ -46,7 +49,12 @@ describe('applyThemeOverrides', () => {
       legend: { family: 'Calibri' },
       dataLabels: { size: 9 },
     });
-    expect(out.title!.font).toMatchObject({ family: 'Arial', size: 30, bold: false, color: expect.objectContaining({ r: 0x12, g: 0x34, b: 0x56 }) });
+    expect(out.title!.font).toMatchObject({
+      family: 'Arial',
+      size: 30,
+      bold: false,
+      color: expect.objectContaining({ r: 0x12, g: 0x34, b: 0x56 }),
+    });
     expect(out.subtitle!.font.family).toBe('Arial');
     expect(out.yAxes[0]!.labels.font).toMatchObject({ family: 'Arial', italic: true, size: 11 });
     // Null fonts are created from the Highcharts default font.
@@ -60,7 +68,11 @@ describe('applyThemeOverrides', () => {
     const m = F.lineModel();
     m.yAxes.push(F.axis({ index: 1, kind: 'linear' }));
     const out = applyThemeOverrides(m, { gridLineColor: '#ff00ff', gridLineWidth: 3 });
-    expect(out.yAxes[0]!.gridLines).toEqual({ color: expect.objectContaining({ r: 255, g: 0, b: 255 }), width: 3, dash: 'solid' });
+    expect(out.yAxes[0]!.gridLines).toEqual({
+      color: expect.objectContaining({ r: 255, g: 0, b: 255 }),
+      width: 3,
+      dash: 'solid',
+    });
     expect(out.yAxes[1]!.gridLines).toMatchObject({ width: 3, color: expect.objectContaining({ r: 255, b: 255 }) });
     expect(out.xAxes[0]!.gridLines).toBeNull();
     const hidden = applyThemeOverrides(m, { gridLineWidth: 0 });
@@ -69,7 +81,9 @@ describe('applyThemeOverrides', () => {
   });
 
   it('applies per-series overrides', () => {
-    const out = applyThemeOverrides(F.areaPercentModel(), { series: { 1: { color: '#abcdef', lineWidth: 4, fillOpacity: 0.3 } } });
+    const out = applyThemeOverrides(F.areaPercentModel(), {
+      series: { 1: { color: '#abcdef', lineWidth: 4, fillOpacity: 0.3 } },
+    });
     const s = out.series[1]!;
     expect(rgbOf(s.color)).toEqual([0xab, 0xcd, 0xef]);
     expect(s.line).toMatchObject({ width: 4 });

@@ -1,7 +1,7 @@
 /**
- * Highcharts 12 vs 13 compatibility matrix. Each version file renders every fixture with its own
+ * Highcharts 11 vs 12 vs 13 compatibility matrix. Each version file renders every fixture with its own
  * Highcharts build, runs `analyzeChartCompatibility` and (for editable charts) the full export,
- * and checks both against the SAME expected table below — so v12 and v13 are proven identical in
+ * and checks both against the SAME expected table below — so v11, v12 and v13 are proven identical in
  * chart type, Excel type and editability without depending on test-file order. Each run writes
  * `tests/output/compatibility-<version>.json`.
  */
@@ -29,7 +29,12 @@ export const EXPECTED_COMPATIBILITY: Readonly<Record<string, ExpectedCompat>> = 
   multiLine: { sourceChartType: 'line', excelChartType: 'line', editable: true },
   splineChart: { sourceChartType: 'spline', excelChartType: 'line', editable: true },
   columnChart: { sourceChartType: 'column', excelChartType: 'column', editable: true },
-  stackedColumn: { sourceChartType: 'column', excelChartType: 'stackedColumn', editable: true, requiredCodes: ['APPROXIMATED_CHART_TYPE'] },
+  stackedColumn: {
+    sourceChartType: 'column',
+    excelChartType: 'stackedColumn',
+    editable: true,
+    requiredCodes: ['APPROXIMATED_CHART_TYPE'],
+  },
   percentStackedColumn: { sourceChartType: 'column', excelChartType: 'percentStackedColumn', editable: true },
   barChart: { sourceChartType: 'bar', excelChartType: 'bar', editable: true },
   areaChart: { sourceChartType: 'area', excelChartType: 'area', editable: true },
@@ -40,15 +45,45 @@ export const EXPECTED_COMPATIBILITY: Readonly<Record<string, ExpectedCompat>> = 
   datetimeChart: { sourceChartType: 'line', excelChartType: 'line', editable: true },
   percentChart: { sourceChartType: 'column', excelChartType: 'column', editable: true },
   customColors: { sourceChartType: 'column', excelChartType: 'column', editable: true },
-  styledMode: { sourceChartType: 'column', excelChartType: 'combo:column+line', editable: true, requiredCodes: ['STYLED_MODE_FALLBACK', 'MIXED_SERIES_TYPES'] },
+  styledMode: {
+    sourceChartType: 'column',
+    excelChartType: 'combo:column+line',
+    editable: true,
+    requiredCodes: ['STYLED_MODE_FALLBACK', 'MIXED_SERIES_TYPES'],
+  },
   customAxes: { sourceChartType: 'line', excelChartType: 'line', editable: true },
-  nullNegative: { sourceChartType: 'line', excelChartType: 'combo:line+column', editable: true, requiredCodes: ['NULL_VALUES', 'MIXED_SERIES_TYPES'] },
-  hiddenSeries: { sourceChartType: 'line', excelChartType: 'line', editable: true, requiredCodes: ['HIDDEN_SERIES_EXCLUDED'] },
-  comboChart: { sourceChartType: 'column', excelChartType: 'combo:column+line', editable: true, requiredCodes: ['MIXED_SERIES_TYPES'] },
-  secondaryAxis: { sourceChartType: 'column', excelChartType: 'combo:column+line', editable: true, requiredCodes: ['SECONDARY_AXIS'] },
+  nullNegative: {
+    sourceChartType: 'line',
+    excelChartType: 'combo:line+column',
+    editable: true,
+    requiredCodes: ['NULL_VALUES', 'MIXED_SERIES_TYPES'],
+  },
+  hiddenSeries: {
+    sourceChartType: 'line',
+    excelChartType: 'line',
+    editable: true,
+    requiredCodes: ['HIDDEN_SERIES_EXCLUDED'],
+  },
+  comboChart: {
+    sourceChartType: 'column',
+    excelChartType: 'combo:column+line',
+    editable: true,
+    requiredCodes: ['MIXED_SERIES_TYPES'],
+  },
+  secondaryAxis: {
+    sourceChartType: 'column',
+    excelChartType: 'combo:column+line',
+    editable: true,
+    requiredCodes: ['SECONDARY_AXIS'],
+  },
   customStyling: { sourceChartType: 'column', excelChartType: 'column', editable: true },
   bubbleChart: { sourceChartType: 'bubble', excelChartType: 'bubble', editable: true },
-  unsupportedType: { sourceChartType: 'columnrange', excelChartType: null, editable: false, requiredCodes: ['UNSUPPORTED_CHART_TYPE'] },
+  unsupportedType: {
+    sourceChartType: 'columnrange',
+    excelChartType: null,
+    editable: false,
+    requiredCodes: ['UNSUPPORTED_CHART_TYPE'],
+  },
   polarChart: { sourceChartType: 'line', excelChartType: null, editable: false, requiredCodes: ['UNSUPPORTED_POLAR'] },
   emptyChart: { sourceChartType: 'line', excelChartType: null, editable: false, requiredCodes: ['EMPTY_CHART'] },
   largeChart: { sourceChartType: 'line', excelChartType: 'line', editable: true },
@@ -64,7 +99,7 @@ export interface CompatRow {
   plotGroups?: string[];
 }
 
-export function runCompatibilityMatrix(Highcharts: HighchartsLike, version: 'v12' | 'v13'): void {
+export function runCompatibilityMatrix(Highcharts: HighchartsLike, version: 'v11' | 'v12' | 'v13'): void {
   const rows: CompatRow[] = [];
 
   describe(`compatibility matrix (Highcharts ${Highcharts.version ?? version})`, () => {
@@ -97,7 +132,11 @@ export function runCompatibilityMatrix(Highcharts: HighchartsLike, version: 'v12
       };
       rows.push(row);
 
-      expect({ sourceChartType: report.sourceChartType, excelChartType: report.excelChartType, editable: report.editable }).toEqual({
+      expect({
+        sourceChartType: report.sourceChartType,
+        excelChartType: report.excelChartType,
+        editable: report.editable,
+      }).toEqual({
         sourceChartType: expected.sourceChartType,
         excelChartType: expected.excelChartType,
         editable: expected.editable,

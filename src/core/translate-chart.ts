@@ -23,11 +23,17 @@ import type {
 import { HIGHCHARTS_DEFAULT_PALETTE, parseColor } from '../utils/colors';
 import { guessExcelDateFormatForRange, highchartsDateFormatToExcel, msToExcelSerial } from '../utils/dates';
 import { sanitizeSheetName } from '../utils/filenames';
+import { isValidExcelFormatCode } from '../utils/format-code';
 import { stripControlChars } from '../utils/text';
 import { clamp } from '../utils/units';
 import { DEFAULT_HIGHCHARTS_FONT } from '../translators/typography-translator';
 import { fillToSolidColor } from '../translators/color-translator';
-import { isCategoryGroupKind, resolveChartType, type ChartTypeResolution, type PlotGroupPlan } from './chart-type-registry';
+import {
+  isCategoryGroupKind,
+  resolveChartType,
+  type ChartTypeResolution,
+  type PlotGroupPlan,
+} from './chart-type-registry';
 import { buildDataLayout, type SeriesRange } from './data-layout';
 import {
   NO_LINE,
@@ -105,7 +111,8 @@ export function dataDateFormat(axis: AxisModel, spanMs: number, withTime: boolea
 
 /** Excel number format for a datetime axis' tick labels. */
 export function axisDateFormat(axis: AxisModel | null, spanMs: number): string {
-  if (axis?.labels.format?.kind === 'excel') return axis.labels.format.code;
+  if (axis?.labels.format?.kind === 'excel' && isValidExcelFormatCode(axis.labels.format.code))
+    return axis.labels.format.code;
   if (axis?.dateFormat) {
     const f = highchartsDateFormatToExcel(axis.dateFormat);
     if (f.kind === 'excel') return f.code;
@@ -154,20 +161,32 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
   const chartSheet = sanitizeSheetName(opts.chartSheetName, taken, 'Chart');
   if (chartSheet.adjusted) {
     out.push(
-      createDiagnostic('SHEET_NAME_ADJUSTED', 'approximated', 'chartSheetName', `Sheet name "${opts.chartSheetName}" was changed to "${chartSheet.name}" to satisfy Excel's naming rules.`, {
-        severity: 'info',
-        details: { requested: opts.chartSheetName, used: chartSheet.name },
-      }),
+      createDiagnostic(
+        'SHEET_NAME_ADJUSTED',
+        'approximated',
+        'chartSheetName',
+        `Sheet name "${opts.chartSheetName}" was changed to "${chartSheet.name}" to satisfy Excel's naming rules.`,
+        {
+          severity: 'info',
+          details: { requested: opts.chartSheetName, used: chartSheet.name },
+        },
+      ),
     );
   }
   taken.add(chartSheet.name);
   const dataSheet = sanitizeSheetName(opts.dataSheetName, taken, 'Data');
   if (dataSheet.adjusted) {
     out.push(
-      createDiagnostic('SHEET_NAME_ADJUSTED', 'approximated', 'dataSheetName', `Sheet name "${opts.dataSheetName}" was changed to "${dataSheet.name}" to satisfy Excel's naming rules.`, {
-        severity: 'info',
-        details: { requested: opts.dataSheetName, used: dataSheet.name },
-      }),
+      createDiagnostic(
+        'SHEET_NAME_ADJUSTED',
+        'approximated',
+        'dataSheetName',
+        `Sheet name "${opts.dataSheetName}" was changed to "${dataSheet.name}" to satisfy Excel's naming rules.`,
+        {
+          severity: 'info',
+          details: { requested: opts.dataSheetName, used: dataSheet.name },
+        },
+      ),
     );
   }
 
@@ -219,22 +238,38 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
 
   if (!isPieChart && model.xAxes.length > 1) {
     out.push(
-      createDiagnostic('MULTIPLE_X_AXES', 'approximated', 'xAxis[1]', 'Excel charts share one category/X axis per axis group; the first x axis is used for every series.', {
-        details: { count: model.xAxes.length },
-      }),
+      createDiagnostic(
+        'MULTIPLE_X_AXES',
+        'approximated',
+        'xAxis[1]',
+        'Excel charts share one category/X axis per axis group; the first x axis is used for every series.',
+        {
+          details: { count: model.xAxes.length },
+        },
+      ),
     );
   }
   if (secondaryY !== null && !isPieChart) {
     out.push(
-      createDiagnostic('SECONDARY_AXIS', 'translated', `yAxis[${secondaryY}]`, 'Series on a second y axis are plotted against an Excel secondary value axis.', {
-        severity: 'info',
-      }),
+      createDiagnostic(
+        'SECONDARY_AXIS',
+        'translated',
+        `yAxis[${secondaryY}]`,
+        'Series on a second y axis are plotted against an Excel secondary value axis.',
+        {
+          severity: 'info',
+        },
+      ),
     );
   }
 
   const fontOf = (font: Parameters<typeof toExcelFont>[0], property: string): ExcelFontSpec | null =>
     best ? toExcelFont(font, property, styleSink) : null;
-  const textSpec = (tb: TextBlock | null, property: string, extra: { lines: string[]; font: ExcelFontSpec | null } | null = null): ExcelTextSpec | null => {
+  const textSpec = (
+    tb: TextBlock | null,
+    property: string,
+    extra: { lines: string[]; font: ExcelFontSpec | null } | null = null,
+  ): ExcelTextSpec | null => {
     if (!tb) return null;
     const own = textOf(tb);
     const lines = [...own, ...(extra?.lines ?? [])];
@@ -270,7 +305,8 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
     const report = p.reportSupport !== false && !p.forceDeleted && a !== null;
     const isValueLike = p.kind === 'val' || p.kind === 'date';
     const deleted = p.forceDeleted === true || (a !== null && !a.visible);
-    const toScale = (v: number | null): number | null => (v === null || !Number.isFinite(v) ? null : p.serial ? msToExcelSerial(v) : v);
+    const toScale = (v: number | null): number | null =>
+      v === null || !Number.isFinite(v) ? null : p.serial ? msToExcelSerial(v) : v;
     let min: number | null = null;
     let max: number | null = null;
     if (a && isValueLike) {
@@ -280,9 +316,15 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
       if (report && a.max !== null) support(`${p.path}.max`);
     } else if (a && (a.min !== null || a.max !== null) && report) {
       out.push(
-        createDiagnostic('APPROXIMATED_AXIS_SCALE', 'approximated', `${p.path}.min`, 'Excel category axes cannot be cropped with min/max; all categories are shown.', {
-          severity: 'info',
-        }),
+        createDiagnostic(
+          'APPROXIMATED_AXIS_SCALE',
+          'approximated',
+          `${p.path}.min`,
+          'Excel category axes cannot be cropped with min/max; all categories are shown.',
+          {
+            severity: 'info',
+          },
+        ),
       );
     }
     let logBase: number | null = null;
@@ -302,7 +344,7 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
       if (report) support(`${p.path}.minorTickInterval`);
     }
     let numberFormat = p.numberFormat ?? null;
-    if (numberFormat === null && a?.labels.format?.kind === 'excel') {
+    if (numberFormat === null && a?.labels.format?.kind === 'excel' && isValidExcelFormatCode(a.labels.format.code)) {
       numberFormat = { code: a.labels.format.code, sourceLinked: false };
     }
     if (report && a?.labels.format?.kind === 'excel') support(`${p.path}.labels.format`);
@@ -385,9 +427,15 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
     const horizontal = catGroups.some((g) => g.barDir === 'bar');
     if (horizontal && catGroups.some((g) => g.kind !== 'bar')) {
       out.push(
-        createDiagnostic('APPROXIMATED_CHART_TYPE', 'approximated', 'chart.type', 'Horizontal bars and line/area series share rotated axes in Excel; lines are drawn on the bar orientation.', {
-          severity: 'info',
-        }),
+        createDiagnostic(
+          'APPROXIMATED_CHART_TYPE',
+          'approximated',
+          'chart.type',
+          'Horizontal bars and line/area series share rotated axes in Excel; lines are drawn on the bar orientation.',
+          {
+            severity: 'info',
+          },
+        ),
       );
     }
     // Category axis kind.
@@ -433,7 +481,13 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
     } else {
       support('xAxis[0].categories');
     }
-    const catPos: ExcelAxisSpec['position'] = horizontal ? (xModel?.opposite ? 'r' : 'l') : xModel?.opposite ? 't' : 'b';
+    const catPos: ExcelAxisSpec['position'] = horizontal
+      ? xModel?.opposite
+        ? 'r'
+        : 'l'
+      : xModel?.opposite
+        ? 't'
+        : 'b';
     if (xModel?.opposite) support('xAxis[0].opposite');
     const primary = catGroups.filter((g) => slotOf(g) === 0);
     const secondary = catGroups.filter((g) => slotOf(g) === 1);
@@ -507,7 +561,9 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
   if (xyGroups.length > 0) {
     const xIsDate = layout.x.kind === 'datetime';
     const span = layout.x.min !== null && layout.x.max !== null ? layout.x.max - layout.x.min : 0;
-    const xFormat: ExcelAxisSpec['numberFormat'] = xIsDate ? { code: axisDateFormat(xModel, span), sourceLinked: false } : null;
+    const xFormat: ExcelAxisSpec['numberFormat'] = xIsDate
+      ? { code: axisDateFormat(xModel, span), sourceLinked: false }
+      : null;
     if (catGroups.length > 0) {
       // Excel cannot put XY series on category axes: give them their own hidden value axes.
       out.push(
@@ -611,13 +667,16 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
   }
 
   // --- Series & plot groups ------------------------------------------------------------------------------
-  const palette: Color[] = model.colors.length > 0 ? model.colors : HIGHCHARTS_DEFAULT_PALETTE.map((c) => parseColor(c)!).filter(Boolean);
-  const paletteColor = (i: number): Color | null => palette[((i % palette.length) + palette.length) % palette.length] ?? null;
+  const palette: Color[] =
+    model.colors.length > 0 ? model.colors : HIGHCHARTS_DEFAULT_PALETTE.map((c) => parseColor(c)!).filter(Boolean);
+  const paletteColor = (i: number): Color | null =>
+    palette[((i % palette.length) + palette.length) % palette.length] ?? null;
   const seriesColorOf = (s: SeriesModel): Color | null => s.color ?? fillToSolidColor(s.fill) ?? paletteColor(s.index);
   const minDim = Math.max(1, Math.min(model.width, model.height));
   let nextIdx = 0;
 
-  const fillOrColor = (fill: Fill | null, color: Color | null): Fill | null => fill ?? (color ? { type: 'solid', color } : null);
+  const fillOrColor = (fill: Fill | null, color: Color | null): Fill | null =>
+    fill ?? (color ? { type: 'solid', color } : null);
 
   const buildSeries = (pos: number, g: PlotGroupPlan): ExcelSeriesSpec => {
     const s = model.series[pos]!;
@@ -671,7 +730,10 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
       }
       if (kind === 'line' || kind === 'scatter') {
         const m: Partial<MarkerStyle> | null =
-          s.marker ?? (kind === 'scatter' ? { enabled: true, symbol: 'circle', radius: 4, fill: null, stroke: null, strokeWidth: 0 } : null);
+          s.marker ??
+          (kind === 'scatter'
+            ? { enabled: true, symbol: 'circle', radius: 4, fill: null, stroke: null, strokeWidth: 0 }
+            : null);
         marker = toExcelMarker(m, color, `${path}.marker`, styleSink);
         if (s.marker) supportStyle(`${path}.marker`);
       }
@@ -679,12 +741,18 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
       shape = { fill: null, line: null };
       if (kind === 'scatter' && !(s.line && s.line.width > 0)) shape.line = { ...NO_LINE };
     }
-    if (best && (kind === 'bar') && s.bars && s.bars.borderRadius > 0) {
+    if (best && kind === 'bar' && s.bars && s.bars.borderRadius > 0) {
       styleSink.push(
-        createDiagnostic('UNSUPPORTED_STYLE', 'approximated', `${path}.borderRadius`, 'Excel bars have square corners; borderRadius is ignored.', {
-          severity: 'info',
-          seriesIndex: s.index,
-        }),
+        createDiagnostic(
+          'UNSUPPORTED_STYLE',
+          'approximated',
+          `${path}.borderRadius`,
+          'Excel bars have square corners; borderRadius is ignored.',
+          {
+            severity: 'info',
+            seriesIndex: s.index,
+          },
+        ),
       );
     }
 
@@ -724,10 +792,16 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
         }
         if (!p.visible) {
           out.push(
-            createDiagnostic('HIDDEN_POINT', 'approximated', `${pPath}.visible`, 'Hidden pie slice is exported and shown in Excel.', {
-              severity: 'info',
-              seriesIndex: s.index,
-            }),
+            createDiagnostic(
+              'HIDDEN_POINT',
+              'approximated',
+              `${pPath}.visible`,
+              'Hidden pie slice is exported and shown in Excel.',
+              {
+                severity: 'info',
+                seriesIndex: s.index,
+              },
+            ),
           );
         }
       } else if (best) {
@@ -741,7 +815,14 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
           }
         }
         if ((kind === 'line' || kind === 'scatter') && (p.marker || p.color)) {
-          const base: Partial<MarkerStyle> = s.marker ?? { enabled: true, symbol: 'circle', radius: 4, fill: null, stroke: null, strokeWidth: 0 };
+          const base: Partial<MarkerStyle> = s.marker ?? {
+            enabled: true,
+            symbol: 'circle',
+            radius: 4,
+            fill: null,
+            stroke: null,
+            strokeWidth: 0,
+          };
           const merged: Partial<MarkerStyle> = { ...base, ...(p.marker ?? {}) };
           if (p.color && !p.marker?.fill) merged.fill = p.color;
           dpMarker = toExcelMarker(merged, p.color ?? color, `${pPath}.marker`, styleSink);
@@ -768,7 +849,9 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
     });
 
     const name: ExcelSeriesSpec['name'] =
-      range.literalName !== null ? { kind: 'literal', text: range.literalName } : { kind: 'ref', formula: range.nameRef.formula, cache: range.nameRef.cache };
+      range.literalName !== null
+        ? { kind: 'literal', text: range.literalName }
+        : { kind: 'ref', formula: range.nameRef.formula, cache: range.nameRef.cache };
     const categories: ExcelSeriesSpec['categories'] = range.categories
       ? {
           formula: range.categories.formula,
@@ -784,7 +867,13 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
       name,
       categories,
       values: { formula: range.values.formula, cache: range.values.cache.slice(), formatCode: range.values.formatCode },
-      bubbleSizes: range.bubbleSizes ? { formula: range.bubbleSizes.formula, cache: range.bubbleSizes.cache.slice(), formatCode: range.bubbleSizes.formatCode } : null,
+      bubbleSizes: range.bubbleSizes
+        ? {
+            formula: range.bubbleSizes.formula,
+            cache: range.bubbleSizes.cache.slice(),
+            formatCode: range.bubbleSizes.formatCode,
+          }
+        : null,
       shape,
       marker: best ? marker : null,
       smooth: kind === 'line' || kind === 'scatter' ? s.smooth : null,
@@ -795,16 +884,41 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
   };
 
   const plotGroups: PlotGroupSpec[] = [];
+  /** Series idx whose legend entry is deleted (Highcharts showInLegend: false; pie legends list points). */
+  const deletedLegendEntries: number[] = [];
   for (const g of groups) {
     const series = g.seriesIndices.map((pos) => buildSeries(pos, g));
+    if (g.kind !== 'pie' && g.kind !== 'doughnut') {
+      g.seriesIndices.forEach((pos, i) => {
+        const s = model.series[pos]!;
+        if (s.showInLegend === false) {
+          deletedLegendEntries.push(series[i]!.idx);
+          support(`series[${s.index}].showInLegend`);
+        }
+      });
+    }
     const first = model.series[g.seriesIndices[0]!]!;
     const axisIds = axisIdsOf.get(g) ?? [AXIS_IDS.primaryCat, AXIS_IDS.primaryVal];
     switch (g.kind) {
       case 'bar': {
         const bars = first.bars ?? { pointPadding: 0.1, groupPadding: 0.2, borderRadius: 0 };
         const gp = clamp(bars.groupPadding, 0, 1);
-        const gapWidth = gp >= 0.5 ? 500 : clamp(Math.round(((gp * 2) / (1 - gp * 2)) * 100), 0, 500);
-        const overlap = g.stacking ? 100 : clamp(0 - Math.round(clamp(bars.pointPadding, 0, 1) * 100), -100, 0);
+        const pp = clamp(bars.pointPadding, 0, 1);
+        // Bar geometry, category width = 1, n = bars side by side (1 when stacked).
+        // Highcharts: slot = (1 - 2gp) / n, bar b = slot * (1 - 2pp), pp*slot of padding on each side of a bar.
+        // Excel: category = n*b + (n-1)*(-overlap/100)*b + (gapWidth/100)*b.
+        //   bars inside a cluster are 2pp*slot apart → overlap = -100 * 2pp / (1 - 2pp)
+        //   between clusters lie 2gp + 2pp*slot      → gapWidth = 100 * (2gp*n + 2pp*(1 - 2gp)) / ((1 - 2gp)(1 - 2pp))
+        // (defaults gp 0.2, pp 0.1: n=1 → 108, n=2 → 192, overlap -25).
+        const n = g.stacking ? 1 : Math.max(1, g.seriesIndices.length);
+        const denom = (1 - 2 * gp) * (1 - 2 * pp);
+        const gapWidth =
+          denom <= 0 ? 500 : clamp(Math.round((100 * (2 * gp * n + 2 * pp * (1 - 2 * gp))) / denom), 0, 500);
+        const overlap = g.stacking
+          ? 100
+          : pp >= 0.5
+            ? -100
+            : clamp(Math.round((-100 * 2 * pp) / (1 - 2 * pp)), -100, 0) || 0; // || 0: no -0
         if (first.bars) support(`series[${first.index}].groupPadding`, `series[${first.index}].pointPadding`);
         plotGroups.push({
           kind: 'bar',
@@ -823,7 +937,15 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
       case 'area': {
         const grouping = g.stacking === 'percent' ? 'percentStacked' : g.stacking === 'normal' ? 'stacked' : 'standard';
         if (g.kind === 'line') {
-          plotGroups.push({ kind: 'line', grouping, varyColors: false, showMarkers: true, series, axisIds, dataLabels: null });
+          plotGroups.push({
+            kind: 'line',
+            grouping,
+            varyColors: false,
+            showMarkers: true,
+            series,
+            axisIds,
+            dataLabels: null,
+          });
         } else {
           plotGroups.push({ kind: 'area', grouping, varyColors: false, series, axisIds, dataLabels: null });
         }
@@ -841,14 +963,20 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
       case 'pie':
       case 'doughnut': {
         const start = first.pie?.startAngle ?? 0;
-        const firstSliceAngle = Math.round((((start % 360) + 360) % 360)) % 360;
+        const firstSliceAngle = Math.round(((start % 360) + 360) % 360) % 360;
         if (first.pie) support(`series[${first.index}].startAngle`);
         const end = first.pie?.endAngle ?? null;
         if (end !== null && Math.abs(end - start - 360) > 0.5 && Math.abs(end - start) > 0.5) {
           out.push(
-            createDiagnostic('APPROXIMATED_CHART_TYPE', 'approximated', `series[${first.index}].endAngle`, 'Excel pies are always full circles; the partial (semi-circle) pie is drawn as a full circle.', {
-              seriesIndex: first.index,
-            }),
+            createDiagnostic(
+              'APPROXIMATED_CHART_TYPE',
+              'approximated',
+              `series[${first.index}].endAngle`,
+              'Excel pies are always full circles; the partial (semi-circle) pie is drawn as a full circle.',
+              {
+                seriesIndex: first.index,
+              },
+            ),
           );
         }
         if (g.kind === 'pie') {
@@ -858,9 +986,15 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
           if (first.pie) support(`series[${first.index}].innerSize`);
           if (g.seriesIndices.length > 1) {
             out.push(
-              createDiagnostic('APPROXIMATED_LAYOUT', 'approximated', `series[${model.series[g.seriesIndices[1]!]!.index}].size`, 'Excel doughnut rings all have the same thickness; ring sizes are approximated.', {
-                severity: 'info',
-              }),
+              createDiagnostic(
+                'APPROXIMATED_LAYOUT',
+                'approximated',
+                `series[${model.series[g.seriesIndices[1]!]!.index}].size`,
+                'Excel doughnut rings all have the same thickness; ring sizes are approximated.',
+                {
+                  severity: 'info',
+                },
+              ),
             );
           }
           plotGroups.push({ kind: 'doughnut', varyColors: true, firstSliceAngle, holeSize, series, dataLabels: null });
@@ -874,27 +1008,46 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
   let title: ExcelTextSpec | null = null;
   if (model.title && textOf(model.title).length > 0) {
     const subtitleLines = model.subtitle ? textOf(model.subtitle) : [];
-    const subtitleFont = model.subtitle && subtitleLines.length > 0 && best ? fontOf(model.subtitle.font, 'subtitle.style') : null;
-    title = textSpec(model.title, 'title', subtitleLines.length > 0 ? { lines: subtitleLines, font: subtitleFont } : null);
+    const subtitleFont =
+      model.subtitle && subtitleLines.length > 0 && best ? fontOf(model.subtitle.font, 'subtitle.style') : null;
+    title = textSpec(
+      model.title,
+      'title',
+      subtitleLines.length > 0 ? { lines: subtitleLines, font: subtitleFont } : null,
+    );
     support('title.text');
     if (best) support('title.style');
     if (subtitleLines.length > 0) {
       support('subtitle.text');
       out.push(
-        createDiagnostic('APPROXIMATED_LAYOUT', 'approximated', 'subtitle.text', 'Excel charts have a single title; the subtitle is merged into the title as a second line in its own font.', {
-          severity: 'info',
-        }),
+        createDiagnostic(
+          'APPROXIMATED_LAYOUT',
+          'approximated',
+          'subtitle.text',
+          'Excel charts have a single title; the subtitle is merged into the title as a second line in its own font.',
+          {
+            severity: 'info',
+          },
+        ),
       );
     }
   } else if (model.subtitle && textOf(model.subtitle).length > 0) {
     title = textSpec(model.subtitle, 'subtitle');
     out.push(
-      createDiagnostic('APPROXIMATED_LAYOUT', 'approximated', 'subtitle.text', 'The chart has no title; the subtitle is used as the Excel chart title.', { severity: 'info' }),
+      createDiagnostic(
+        'APPROXIMATED_LAYOUT',
+        'approximated',
+        'subtitle.text',
+        'The chart has no title; the subtitle is used as the Excel chart title.',
+        { severity: 'info' },
+      ),
     );
   }
 
   const baseFamily = model.title?.font.family ?? model.legend.font?.family ?? DEFAULT_HIGHCHARTS_FONT.family;
-  const textDefaults = best ? toExcelFont({ ...DEFAULT_HIGHCHARTS_FONT, family: baseFamily, size: 12 }, 'chart.style.fontFamily', styleSink) : null;
+  const textDefaults = best
+    ? toExcelFont({ ...DEFAULT_HIGHCHARTS_FONT, family: baseFamily, size: 12 }, 'chart.style.fontFamily', styleSink)
+    : null;
 
   const chartArea: ExcelShapeStyle = best
     ? { fill: toExcelFill(model.background), line: toExcelLine(model.border) }
@@ -905,16 +1058,25 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
   let manualLayout: ExcelChartSpec['plotArea']['manualLayout'] = null;
   const box = model.plotArea.box;
   if (best && !isPieChart && box && model.width > 0 && model.height > 0) {
-    const w = box.width / model.width;
-    const h = box.height / model.height;
-    if (w > 0.2 && h > 0.2 && w <= 1.0001 && h <= 1.0001) {
-      const r = (v: number): number => Math.round(clamp(v, 0, 1) * 10000) / 10000;
-      manualLayout = { x: r(box.left / model.width), y: r(box.top / model.height), w: r(w), h: r(h) };
+    const r = (v: number): number => Math.round(clamp(v, 0, 1) * 10000) / 10000;
+    const x = r(box.left / model.width);
+    const y = r(box.top / model.height);
+    // Keep the pinned box inside the chart: x + w ≤ 1 and y + h ≤ 1.
+    const w = r(Math.min(box.width / model.width, 1 - x));
+    const h = r(Math.min(box.height / model.height, 1 - y));
+    if (w > 0.2 && h > 0.2) {
+      manualLayout = { x, y, w, h };
       out.push(
-        createDiagnostic('APPROXIMATED_LAYOUT', 'approximated', 'chart.plotArea', 'Plot area pinned to source proportions; Excel positions titles and labels around it itself.', {
-          severity: 'info',
-          details: { ...manualLayout },
-        }),
+        createDiagnostic(
+          'APPROXIMATED_LAYOUT',
+          'approximated',
+          'chart.plotArea',
+          'Plot area pinned to source proportions; Excel positions titles and labels around it itself.',
+          {
+            severity: 'info',
+            details: { ...manualLayout },
+          },
+        ),
       );
     }
   }
@@ -937,12 +1099,21 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
       font: fontOf(model.legend.font, 'legend.itemStyle'),
       fill: best ? toExcelFill(model.legend.background) : null,
       line: best ? toExcelLine(model.legend.border) : null,
+      deletedEntries: deletedLegendEntries,
     };
     if (model.legend.font) supportStyle('legend.itemStyle');
     if (model.legend.background) supportStyle('legend.backgroundColor');
     if (model.legend.border) supportStyle('legend.borderWidth', 'legend.borderColor');
     if (model.legend.reversed) {
-      out.push(createDiagnostic('UNSUPPORTED_STYLE', 'unsupported', 'legend.reversed', 'Excel cannot reverse the legend order.', { severity: 'info' }));
+      out.push(
+        createDiagnostic(
+          'UNSUPPORTED_STYLE',
+          'unsupported',
+          'legend.reversed',
+          'Excel cannot reverse the legend order.',
+          { severity: 'info' },
+        ),
+      );
     }
   }
 
@@ -969,7 +1140,14 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
     drawings.push({
       kind: 'image',
       png: opts.referenceImage.png,
-      anchor: { col0, row0: 2, colOffsetPx: offset - col0 * DEFAULT_COLUMN_WIDTH_PX, rowOffsetPx: 0, widthPx, heightPx },
+      anchor: {
+        col0,
+        row0: 2,
+        colOffsetPx: offset - col0 * DEFAULT_COLUMN_WIDTH_PX,
+        rowOffsetPx: 0,
+        widthPx,
+        heightPx,
+      },
       name: 'Reference image',
     });
   }
@@ -978,7 +1156,9 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
     name: chartSheet.name,
     hidden: false,
     columns: [],
-    rows: titleText ? [{ row0: 0, cells: [{ col0: 0, row0: 0, value: { type: 'string', value: titleText }, style: { bold: true } }] }] : [],
+    rows: titleText
+      ? [{ row0: 0, cells: [{ col0: 0, row0: 0, value: { type: 'string', value: titleText }, style: { bold: true } }] }]
+      : [],
     freezeHeaderRow: false,
     drawings,
   };
@@ -994,4 +1174,3 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
     resolution,
   };
 }
-

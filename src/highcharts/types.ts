@@ -10,6 +10,7 @@ import type { Color, Font } from '../types/chart-model';
 import type { DataMode, SeriesVisibilityMode } from '../types/public-api';
 import type { DiagnosticCollector } from '../types/diagnostics';
 import type { CssVariableResolver } from '../utils/colors';
+import type { DatetimeShifter } from './extract-time';
 
 /** An SVG/HTML wrapper (`SVGElement` in Highcharts' renderer). */
 export interface HcWrapperLike {
@@ -78,6 +79,8 @@ export interface HcSeriesLike {
   yAxis?: HcAxisLike;
   hasGroupedData?: boolean;
   cropped?: boolean;
+  /** Set by the boost module: `points` then holds pixel pseudo-points without values. */
+  boosted?: boolean;
   /** Present on navigator series (Highcharts Stock). */
   baseSeries?: unknown;
   /** Pie geometry in px: [centerX, centerY, diameter, innerDiameter]. */
@@ -119,6 +122,8 @@ export interface HcChartLike {
   plotBackground?: HcWrapperLike;
   legend?: HcLegendLike;
   renderer?: { style?: Record<string, unknown> };
+  /** `Highcharts.Time` instance (`getTimezoneOffset`, `dateFormat`). */
+  time?: unknown;
 }
 
 /** A plain (JSON-like) Highcharts options object as supplied by a developer. */
@@ -127,7 +132,6 @@ export type HcOptionsLike = Record<string, unknown>;
 // ---------------------------------------------------------------------------
 // Internal normalized "view" shared by the instance and the plain-options extractors.
 // ---------------------------------------------------------------------------
-
 
 export interface AxisView {
   which: 'x' | 'y';
@@ -189,4 +193,6 @@ export interface ExtractContext {
   diagnostics: DiagnosticCollector;
   dataMode: DataMode;
   seriesVisibility: SeriesVisibilityMode;
+  /** Moves datetime x values to the wall-clock time the chart displays. */
+  time: DatetimeShifter;
 }

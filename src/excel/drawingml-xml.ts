@@ -10,8 +10,17 @@ export const EMU_PER_PX = 9525;
 const MAX_LINE_WIDTH_EMU = 20_116_800;
 
 const VALID_DASHES: ReadonlySet<OoxmlDash> = new Set<OoxmlDash>([
-  'solid', 'dash', 'dot', 'dashDot', 'lgDash', 'lgDashDot', 'lgDashDotDot',
-  'sysDash', 'sysDot', 'sysDashDot', 'sysDashDotDot',
+  'solid',
+  'dash',
+  'dot',
+  'dashDot',
+  'lgDash',
+  'lgDashDot',
+  'lgDashDotDot',
+  'sysDash',
+  'sysDot',
+  'sysDashDot',
+  'sysDashDotDot',
 ]);
 
 /** Validate and normalise an RRGGBB colour (a leading '#' is tolerated). */
@@ -60,7 +69,9 @@ export function fillXml(fill: ExcelFillSpec | null | undefined): string {
       if (stops.length === 1) return solidFill(stops[0]!.hex, stops[0]!.alpha);
       const sorted = [...stops].sort((a, b) => finite(a.pos, 0) - finite(b.pos, 0));
       const gs = sorted
-        .map((s) => `<a:gs pos="${clampInt(finite(s.pos, 0) * 100_000, 0, 100_000, 0)}">${srgbClr(s.hex, s.alpha)}</a:gs>`)
+        .map(
+          (s) => `<a:gs pos="${clampInt(finite(s.pos, 0) * 100_000, 0, 100_000, 0)}">${srgbClr(s.hex, s.alpha)}</a:gs>`,
+        )
         .join('');
       // ST_PositiveFixedAngle: [0, 21600000).
       const ang = ((degToAngle(fill.angle) % 21_600_000) + 21_600_000) % 21_600_000;

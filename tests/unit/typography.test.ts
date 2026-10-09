@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_HIGHCHARTS_FONT, fontToOoxml, primaryFontFamily, toFont } from '../../src/translators/typography-translator';
+import {
+  DEFAULT_HIGHCHARTS_FONT,
+  fontToOoxml,
+  primaryFontFamily,
+  toFont,
+} from '../../src/translators/typography-translator';
 import { colorToHex } from '../../src/utils/colors';
 
 describe('toFont', () => {
@@ -71,10 +76,25 @@ describe('fontToOoxml', () => {
     });
   });
   it('clamps sizes and reports generic families', () => {
-    const r = fontToOoxml({ family: 'monospace', size: 1, bold: true, italic: true, color: null }, 'title.style.fontFamily');
+    const r = fontToOoxml(
+      { family: 'monospace', size: 1, bold: true, italic: true, color: null },
+      'title.style.fontFamily',
+    );
     expect(r).toMatchObject({ typeface: 'Consolas', sizeHundredthsPt: 100, bold: true, italic: true, colorHex: null });
-    expect(r.diagnostic).toMatchObject({ code: 'APPROXIMATED_FONT', outcome: 'approximated', property: 'title.style.fontFamily' });
-    expect(fontToOoxml({ family: null, size: 10000, bold: false, italic: false, color: null }).sizeHundredthsPt).toBe(40000);
-    expect(fontToOoxml(null)).toEqual({ typeface: null, sizeHundredthsPt: null, bold: false, italic: false, colorHex: null });
+    expect(r.diagnostic).toMatchObject({
+      code: 'APPROXIMATED_FONT',
+      outcome: 'approximated',
+      property: 'title.style.fontFamily',
+    });
+    expect(fontToOoxml({ family: null, size: 10000, bold: false, italic: false, color: null }).sizeHundredthsPt).toBe(
+      40000,
+    );
+    expect(fontToOoxml(null)).toEqual({
+      typeface: null,
+      sizeHundredthsPt: null,
+      bold: false,
+      italic: false,
+      colorHex: null,
+    });
   });
 });

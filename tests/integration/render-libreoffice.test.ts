@@ -77,17 +77,32 @@ describe.skipIf(SKIP_REASON !== null)('LibreOffice render smoke check (not an Ex
     for (const c of CASES) rmSync(join(OUT, `${c.name}.pdf`), { force: true });
     const profile = mkdtempSync(join(tmpdir(), 'hc2xl-lo-'));
     try {
-      execFileSync(SOFFICE!, [`-env:UserInstallation=${pathToFileURL(profile).href}`, '--headless', '--convert-to', 'pdf', '--outdir', OUT, ...files], {
-        stdio: 'pipe',
-        timeout: 180_000,
-      });
+      execFileSync(
+        SOFFICE!,
+        [
+          `-env:UserInstallation=${pathToFileURL(profile).href}`,
+          '--headless',
+          '--convert-to',
+          'pdf',
+          '--outdir',
+          OUT,
+          ...files,
+        ],
+        {
+          stdio: 'pipe',
+          timeout: 180_000,
+        },
+      );
     } finally {
       rmSync(profile, { recursive: true, force: true });
     }
     for (const c of CASES) {
       const pdf = join(OUT, `${c.name}.pdf`);
       if (!existsSync(pdf)) continue;
-      execFileSync(PDFTOPPM!, ['-r', '60', '-png', '-f', '1', '-singlefile', pdf, join(OUT, c.name)], { stdio: 'pipe', timeout: 60_000 });
+      execFileSync(PDFTOPPM!, ['-r', '60', '-png', '-f', '1', '-singlefile', pdf, join(OUT, c.name)], {
+        stdio: 'pipe',
+        timeout: 60_000,
+      });
       pdfText.set(c.name, execFileSync(PDFTOTEXT!, [pdf, '-'], { encoding: 'utf8', timeout: 60_000 }));
     }
   }, 240_000);
@@ -112,8 +127,19 @@ describe.skipIf(SKIP_REASON !== null)('LibreOffice render smoke check (not an Ex
 });
 
 if (SKIP_REASON !== null) {
-  console.warn(`[render-libreoffice] skipped: ${SKIP_REASON}`);
-  describe('LibreOffice render smoke check', () => {
-    it.skip(`skipped: ${SKIP_REASON}`, () => {});
-  });
+  if (process.env.REQUIRE_RENDER === '1') {
+    // CI sets REQUIRE_RENDER=1 after installing LibreOffice + poppler: a missing tool is a failure there.
+    describe('LibreOffice render smoke check', () => {
+      it('requires the render toolchain (REQUIRE_RENDER=1)', () => {
+        throw new Error(
+          `[render-libreoffice] REQUIRE_RENDER=1 but ${SKIP_REASON}. Install libreoffice-calc and poppler-utils.`,
+        );
+      });
+    });
+  } else {
+    console.warn(`[render-libreoffice] skipped: ${SKIP_REASON} (set REQUIRE_RENDER=1 to make this a failure)`);
+    describe('LibreOffice render smoke check', () => {
+      it.skip(`skipped: ${SKIP_REASON}`, () => {});
+    });
+  }
 }

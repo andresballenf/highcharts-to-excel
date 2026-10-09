@@ -51,10 +51,15 @@ describe('OoxmlExcelWriter – package', () => {
   it('declares content types for every part', async () => {
     const { x } = await build();
     const ct = x.text('[Content_Types].xml');
-    expect(ct).toContain('<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>');
+    expect(ct).toContain(
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    );
     expect(ct).toContain('<Default Extension="xml" ContentType="application/xml"/>');
     expect(ct).toContain('<Default Extension="png" ContentType="image/png"/>');
-    const overrides = [...ct.matchAll(/<Override PartName="([^"]+)" ContentType="([^"]+)"\/>/g)].map((m) => [m[1], m[2]]);
+    const overrides = [...ct.matchAll(/<Override PartName="([^"]+)" ContentType="([^"]+)"\/>/g)].map((m) => [
+      m[1],
+      m[2],
+    ]);
     expect(Object.fromEntries(overrides)).toEqual({
       '/xl/workbook.xml': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml',
       '/xl/worksheets/sheet1.xml': 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml',
@@ -71,7 +76,10 @@ describe('OoxmlExcelWriter – package', () => {
     // every non-rels/png part is declared via Override or the xml default
     for (const p of x.parts) {
       if (p.endsWith('.rels') || p.endsWith('.png') || p === '[Content_Types].xml') continue;
-      expect(overrides.some(([name]) => name === `/${p}`), p).toBe(true);
+      expect(
+        overrides.some(([name]) => name === `/${p}`),
+        p,
+      ).toBe(true);
     }
   });
 
@@ -117,11 +125,27 @@ describe('OoxmlExcelWriter – package', () => {
     const theme = x.text('xl/theme/theme1.xml');
     expect(elementOrder(theme, 'a:themeElements')).toEqual(['a:clrScheme', 'a:fontScheme', 'a:fmtScheme']);
     expect(elementOrder(theme, 'a:clrScheme')).toEqual([
-      'a:dk1', 'a:lt1', 'a:dk2', 'a:lt2', 'a:accent1', 'a:accent2', 'a:accent3', 'a:accent4', 'a:accent5', 'a:accent6', 'a:hlink', 'a:folHlink',
+      'a:dk1',
+      'a:lt1',
+      'a:dk2',
+      'a:lt2',
+      'a:accent1',
+      'a:accent2',
+      'a:accent3',
+      'a:accent4',
+      'a:accent5',
+      'a:accent6',
+      'a:hlink',
+      'a:folHlink',
     ]);
     expect(theme).toContain('<a:accent1><a:srgbClr val="4472C4"/></a:accent1>');
     expect(theme).toContain('typeface="Calibri Light"');
-    expect(elementOrder(theme, 'a:fmtScheme')).toEqual(['a:fillStyleLst', 'a:lnStyleLst', 'a:effectStyleLst', 'a:bgFillStyleLst']);
+    expect(elementOrder(theme, 'a:fmtScheme')).toEqual([
+      'a:fillStyleLst',
+      'a:lnStyleLst',
+      'a:effectStyleLst',
+      'a:bgFillStyleLst',
+    ]);
     for (const lst of ['a:fillStyleLst', 'a:lnStyleLst', 'a:effectStyleLst', 'a:bgFillStyleLst']) {
       expect(elementOrder(theme, lst), lst).toHaveLength(3);
     }
@@ -132,16 +156,32 @@ describe('OoxmlExcelWriter – worksheet', () => {
   it('orders worksheet children and writes freeze pane, widths and dimension', async () => {
     const { x } = await build();
     const s = x.text(DATA);
-    expect(elementOrder(s, 'worksheet')).toEqual(['dimension', 'sheetViews', 'sheetFormatPr', 'cols', 'sheetData', 'pageMargins']);
+    expect(elementOrder(s, 'worksheet')).toEqual([
+      'dimension',
+      'sheetViews',
+      'sheetFormatPr',
+      'cols',
+      'sheetData',
+      'pageMargins',
+    ]);
     expect(s).toContain('<dimension ref="A1:G8"/>');
     expect(s).toContain('<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>');
-    expect(s).toContain('<col min="1" max="1" width="14" customWidth="1"/><col min="5" max="5" width="30.5" customWidth="1"/>');
+    expect(s).toContain(
+      '<col min="1" max="1" width="14" customWidth="1"/><col min="5" max="5" width="30.5" customWidth="1"/>',
+    );
     expect(s).toContain('<sheetFormatPr defaultRowHeight="15"/>');
     const rowNums = [...s.matchAll(/<row r="(\d+)"/g)].map((m) => Number(m[1]));
     expect(rowNums).toEqual([1, 2, 3, 4, 5, 7, 8]);
     // chart sheet references its drawing
     const chartSheet = x.text('xl/worksheets/sheet2.xml');
-    expect(elementOrder(chartSheet, 'worksheet')).toEqual(['dimension', 'sheetViews', 'sheetFormatPr', 'sheetData', 'pageMargins', 'drawing']);
+    expect(elementOrder(chartSheet, 'worksheet')).toEqual([
+      'dimension',
+      'sheetViews',
+      'sheetFormatPr',
+      'sheetData',
+      'pageMargins',
+      'drawing',
+    ]);
     expect(chartSheet).toContain('<drawing r:id="rId1"/>');
     expect(x.text('xl/worksheets/_rels/sheet2.xml.rels')).toContain('Target="../drawings/drawing1.xml"');
   });
@@ -155,6 +195,9 @@ describe('OoxmlExcelWriter – worksheet', () => {
     expect(x.cellXml(DATA, 'G5')).toContain('<v>0</v>');
     expect(x.cellValue(DATA, 'F8')).toBe(1);
     expect(x.cellXml(DATA, 'F8')).toContain('t="b"');
+    // #N/A error cell (alignment gaps: line/area charts connect across it)
+    expect(x.cellXml(DATA, 'G8')).toBe('<c r="G8" t="e"><v>#N/A</v></c>');
+    expect(x.cellValue(DATA, 'G8')).toBe('#N/A');
     // blank without style → omitted; blank with style → styled empty cell
     expect(x.cellXml(DATA, 'B3')).toBeNull();
     expect(x.cellXml(DATA, 'A4')).toMatch(/^<c r="A4" s="\d+"\/>$/);
@@ -188,20 +231,92 @@ describe('OoxmlExcelWriter – worksheet', () => {
   });
 });
 
+describe('OoxmlExcelWriter – strictness (W4, W5, W8, W9, W10)', () => {
+  const oneSheet = (cells: WorkbookSpec['sheets'][number]['rows'][number]['cells']): WorkbookSpec => {
+    const wb = fullWorkbook();
+    wb.sheets[0]!.rows = [{ row0: 0, cells }];
+    return wb;
+  };
+
+  it('W4: escapes _xHHHH_ sequences in cell text', async () => {
+    const { x } = await build(oneSheet([{ col0: 0, row0: 0, value: { type: 'string', value: '_x0041_BC' } }]));
+    expect(x.cellXml(DATA, 'A1')).toBe(
+      '<c r="A1" t="inlineStr"><is><t xml:space="preserve">_x005F_x0041_BC</t></is></c>',
+    );
+  });
+
+  it('W8: encodes carriage returns in text content', async () => {
+    const { x } = await build(oneSheet([{ col0: 0, row0: 0, value: { type: 'string', value: 'a\r\nb' } }]));
+    expect(x.cellXml(DATA, 'A1')).toContain('>a&#13;\nb</t>');
+  });
+
+  it('W5: rejects invalid number format codes in cell styles', async () => {
+    for (const numberFormat of ['0"x', '[Red0', '0;0;0;0;0', '0'.repeat(256)]) {
+      const wb = oneSheet([{ col0: 0, row0: 0, value: { type: 'number', value: 1 }, style: { numberFormat } }]);
+      await expect(new OoxmlExcelWriter().write(wb), numberFormat).rejects.toThrow(/number format/);
+    }
+  });
+
+  it('W9: only left/center/right alignments are written', async () => {
+    const wb = oneSheet([
+      {
+        col0: 0,
+        row0: 0,
+        value: { type: 'number', value: 1 },
+        style: { align: 'center" foo="x' as 'center', bold: true },
+      },
+      { col0: 1, row0: 0, value: { type: 'number', value: 2 }, style: { align: 'right' } },
+    ]);
+    const { x } = await build(wb);
+    const styles = x.text('xl/styles.xml');
+    expect(styles).not.toContain('foo=');
+    expect(styles.match(/<alignment /g)).toHaveLength(1);
+    expect(styles).toContain('<alignment horizontal="right"/>');
+  });
+
+  it('W10: resolves every registered style object (same index for equal styles)', async () => {
+    const shared = { bold: true };
+    const wb = oneSheet([
+      { col0: 0, row0: 0, value: { type: 'number', value: 1 }, style: shared },
+      { col0: 1, row0: 0, value: { type: 'number', value: 2 }, style: shared },
+      { col0: 2, row0: 0, value: { type: 'number', value: 3 }, style: { bold: true } },
+    ]);
+    const { x } = await build(wb);
+    const s = (ref: string) => /\bs="(\d+)"/.exec(x.cellXml(DATA, ref)!)?.[1];
+    expect(s('A1')).toBeDefined();
+    expect(s('B1')).toBe(s('A1'));
+    expect(s('C1')).toBe(s('A1'));
+  });
+});
+
 describe('OoxmlExcelWriter – styles', () => {
   it('writes mandatory fills, built-in and custom numFmts, fonts and cellXfs', async () => {
     const { x } = await build();
     const st = x.text('xl/styles.xml');
-    expect(elementOrder(st, 'styleSheet')).toEqual(['numFmts', 'fonts', 'fills', 'borders', 'cellStyleXfs', 'cellXfs', 'cellStyles', 'dxfs', 'tableStyles']);
+    expect(elementOrder(st, 'styleSheet')).toEqual([
+      'numFmts',
+      'fonts',
+      'fills',
+      'borders',
+      'cellStyleXfs',
+      'cellXfs',
+      'cellStyles',
+      'dxfs',
+      'tableStyles',
+    ]);
     const fills = elementOrder(st, 'fills');
     expect(fills.length).toBeGreaterThanOrEqual(3);
-    expect(st).toMatch(/<fills count="\d+"><fill><patternFill patternType="none"\/><\/fill><fill><patternFill patternType="gray125"\/><\/fill>/);
+    expect(st).toMatch(
+      /<fills count="\d+"><fill><patternFill patternType="none"\/><\/fill><fill><patternFill patternType="gray125"\/><\/fill>/,
+    );
     expect(st).toContain('<fgColor rgb="FFDDEBF7"/>');
     // custom formats start at 164; "0.00" maps to built-in id 2
     expect(st).toContain('<numFmt numFmtId="164" formatCode="yyyy-mm-dd"/>');
     expect(st).toContain('<numFmt numFmtId="165" formatCode="0.0%"/>');
     expect(st).not.toContain('formatCode="0.00"');
-    expect(st).toMatch(/<xf numFmtId="2" fontId="\d+" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"\/>/);
+    expect(st).toMatch(
+      /<xf numFmtId="2" fontId="\d+" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"\/>/,
+    );
     expect(st).toContain('<cellXfs count="6">'); // default + header, date, percent, italic blank, notes
     expect(st).toContain('<cellStyle name="Normal" xfId="0" builtinId="0"/>');
     const parsed = x.xml('xl/styles.xml');
@@ -228,7 +343,9 @@ describe('OoxmlExcelWriter – drawings', () => {
     expect(elementOrder(d, 'xdr:wsDr')).toEqual(['xdr:oneCellAnchor', 'xdr:oneCellAnchor']);
     expect(elementOrder(d, 'xdr:oneCellAnchor')).toEqual(['xdr:from', 'xdr:ext', 'xdr:graphicFrame', 'xdr:clientData']);
     expect(elementOrder(d, 'xdr:from')).toEqual(['xdr:col', 'xdr:colOff', 'xdr:row', 'xdr:rowOff']);
-    expect(d).toContain('<xdr:from><xdr:col>1</xdr:col><xdr:colOff>38100</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>19050</xdr:rowOff></xdr:from>');
+    expect(d).toContain(
+      '<xdr:from><xdr:col>1</xdr:col><xdr:colOff>38100</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>19050</xdr:rowOff></xdr:from>',
+    );
     expect(d).toContain('<xdr:ext cx="5715000" cy="3810000"/>');
     expect(d).toContain('<xdr:cNvPr id="2" name="Chart 1"/>');
     expect(d).toContain('r:id="rId1"/></a:graphicData>');
@@ -236,8 +353,12 @@ describe('OoxmlExcelWriter – drawings', () => {
     expect(elementOrder(d, 'xdr:graphicFrame')).toEqual(['xdr:nvGraphicFramePr', 'xdr:xfrm', 'a:graphic']);
     expect(elementOrder(d, 'xdr:pic')).toEqual(['xdr:nvPicPr', 'xdr:blipFill', 'xdr:spPr']);
     const rels = x.text('xl/drawings/_rels/drawing1.xml.rels');
-    expect(rels).toContain('<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/>');
-    expect(rels).toContain('<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>');
+    expect(rels).toContain(
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/>',
+    );
+    expect(rels).toContain(
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>',
+    );
     expect(x.hasImages()).toBe(true);
   });
 
@@ -255,7 +376,12 @@ describe('OoxmlExcelWriter – drawings', () => {
   it('numbers charts globally and omits media without images', async () => {
     const wb = fullWorkbook({ charts: [chartSpecs.pie(), chartSpecs.scatter()], image: false });
     wb.sheets[0]!.drawings = [
-      { kind: 'chart', chart: chartSpecs.bubble(), name: 'On data', anchor: { col0: 9, row0: 0, colOffsetPx: 0, rowOffsetPx: 0, widthPx: 300, heightPx: 200 } },
+      {
+        kind: 'chart',
+        chart: chartSpecs.bubble(),
+        name: 'On data',
+        anchor: { col0: 9, row0: 0, colOffsetPx: 0, rowOffsetPx: 0, widthPx: 300, heightPx: 200 },
+      },
     ];
     const { x } = await build(wb);
     x.assertWellFormed();
@@ -265,7 +391,9 @@ describe('OoxmlExcelWriter – drawings', () => {
     expect(x.plotGroupKinds('xl/charts/chart1.xml')).toEqual(['bubbleChart']);
     expect(x.plotGroupKinds('xl/charts/chart2.xml')).toEqual(['pieChart']);
     expect(x.text('xl/drawings/_rels/drawing2.xml.rels')).toContain('Target="../charts/chart3.xml"');
-    expect(x.seriesFormulas('xl/charts/chart3.xml')).toEqual([{ name: NAME1_F, xVal: "'Data'!$D$2:$D$5", yVal: VAL1_F }]);
+    expect(x.seriesFormulas('xl/charts/chart3.xml')).toEqual([
+      { name: NAME1_F, xVal: "'Data'!$D$2:$D$5", yVal: VAL1_F },
+    ]);
     expect(x.text('xl/worksheets/sheet1.xml')).toMatch(/<pageMargins [^>]*\/><drawing r:id="rId1"\/><\/worksheet>/);
   });
 });
@@ -291,7 +419,10 @@ describe('OoxmlExcelWriter – invalid input', () => {
     wb.sheets[0]!.rows.push({ row0: 0, cells: [{ col0: 0, row0: 0, value: { type: 'number', value: 1 } }] });
     await expect(w.write(wb)).rejects.toThrow(/duplicate cell A1/);
     const wb2 = fullWorkbook();
-    wb2.sheets[0]!.rows.push({ row0: 2_000_000, cells: [{ col0: 0, row0: 2_000_000, value: { type: 'number', value: 1 } }] });
+    wb2.sheets[0]!.rows.push({
+      row0: 2_000_000,
+      cells: [{ col0: 0, row0: 2_000_000, value: { type: 'number', value: 1 } }],
+    });
     await expect(w.write(wb2)).rejects.toThrow(/outside/);
     const wb3 = fullWorkbook();
     const img = wb3.sheets[1]!.drawings.find((d) => d.kind === 'image')!;

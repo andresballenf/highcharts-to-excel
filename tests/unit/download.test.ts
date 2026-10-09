@@ -48,6 +48,38 @@ describe('triggerDownload', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
   });
 
+  it('A7 keeps the object URL alive for 60 s before revoking it', () => {
+    triggerDownload(new Uint8Array([1, 2]), 'slow.xlsx');
+    vi.advanceTimersByTime(59_999);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
+  });
+
+  it('A7 hands whole-buffer bytes to the Blob without copying and copies a sub-view', () => {
+    const parts: unknown[][] = [];
+    vi.stubGlobal(
+      'Blob',
+      class {
+        readonly type: string;
+        constructor(p: unknown[], o: { type: string }) {
+          parts.push(p);
+          this.type = o.type;
+        }
+      },
+    );
+    const whole = new Uint8Array([1, 2, 3, 4]);
+    triggerDownload(whole, 'whole.xlsx');
+    expect(parts[0]?.[0]).toBe(whole);
+    const sub = new Uint8Array(new ArrayBuffer(16), 4, 4);
+    sub.set([9, 8, 7, 6]);
+    triggerDownload(sub, 'sub.xlsx');
+    const copied = parts[1]?.[0] as Uint8Array;
+    expect(copied).not.toBe(sub);
+    expect(Array.from(copied)).toEqual([9, 8, 7, 6]);
+    expect(copied.byteLength).toBe(copied.buffer.byteLength);
+  });
+
   it('uses a custom MIME type', () => {
     triggerDownload(new Uint8Array([1]), 'x.bin', 'application/octet-stream');
     expect(blobs[0]?.type).toBe('application/octet-stream');
@@ -77,6 +109,8 @@ describe('triggerDownload', () => {
 
   it('throws BROWSER_REQUIRED without URL.createObjectURL', () => {
     vi.stubGlobal('URL', { revokeObjectURL });
-    expect(() => triggerDownload(new Uint8Array([1]), 'a.xlsx')).toThrow(expect.objectContaining({ code: 'BROWSER_REQUIRED' }));
+    expect(() => triggerDownload(new Uint8Array([1]), 'a.xlsx')).toThrow(
+      expect.objectContaining({ code: 'BROWSER_REQUIRED' }),
+    );
   });
 });

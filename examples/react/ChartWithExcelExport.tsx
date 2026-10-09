@@ -22,7 +22,9 @@ export function ChartWithExcelExport() {
   return (
     <div>
       <HighchartsReact highcharts={Highcharts} options={options} ref={chartComponentRef} />
-      <button onClick={onDownload}>Download editable Excel chart</button>
+      <button type="button" onClick={onDownload}>
+        Download editable Excel chart
+      </button>
     </div>
   );
 }
