@@ -60,7 +60,9 @@ export function runExtractorSuite(Highcharts: HighchartsLike, label: string): vo
       expect(kinds(F.doughnutChart)).toEqual(['doughnut']);
       const { model } = extract(F.unsupportedType);
       expect(model.series[0]!.kind).toBe('unknown');
-      expect(model.series[0]!.sourceType).toBe('columnrange');
+      expect(model.series[0]!.sourceType).toBe('boxplot');
+      expect(kinds(F.columnRangeChart)).toEqual(['columnrange']);
+      expect(kinds(F.errorBarChart)).toEqual(['column', 'errorbar']);
     });
 
     it('reads categories, points, nulls and negatives', () => {
@@ -746,6 +748,113 @@ export function runExtractorSuite(Highcharts: HighchartsLike, label: string): vo
       } finally {
         proto.getContext = original;
       }
+    });
+  });
+
+  describe(`fidelity backlog extraction (${label})`, () => {
+    afterEach(() => destroyAll());
+
+    it('errorbar series carry low/high, their parent id and the black errorbar color', () => {
+      const live = extract(F.errorBarChart).model;
+      const plain = extractChartModelFromOptions(F.errorBarChart, opts());
+      for (const m of [live, plain]) {
+        const [rain, err] = m.series;
+        expect(rain!.id).toBe('rain');
+        expect(err!.kind).toBe('errorbar');
+        expect(err!.linkedTo).toBe('rain');
+        expect(err!.points.map((p) => [p.low, p.high])).toEqual([
+          [48, 51],
+          [68, 73],
+          [92, 110],
+          [128, 136],
+        ]);
+        expect(hex(err!.color)).toBe('#000000');
+        expect(err!.line?.width).toBeGreaterThan(0);
+        // The errorbar does not consume a palette slot: the column keeps color 0.
+        expect(hex(rain!.color)).toBe('#2caffe');
+        expect(m.warnings.filter((w) => w.code === 'NON_NUMERIC_VALUE')).toEqual([]);
+      }
+    });
+
+    it("an errorbar without linkedTo links to the previous series (':previous' default)", () => {
+      const fixture = {
+        ...F.errorBarChart,
+        series: [
+          { type: 'column' as const, name: 'Rainfall', data: [1, 2] },
+          {
+            type: 'errorbar' as const,
+            name: 'Err',
+            data: [
+              [0.5, 1.5],
+              [1, 3],
+            ],
+          },
+        ],
+      };
+      for (const m of [extract(fixture).model, extractChartModelFromOptions(fixture, opts())]) {
+        expect(m.series[1]!.linkedTo).toBe(m.series[0]!.id);
+      }
+    });
+
+    it('column ranges carry low/high and no y', () => {
+      const m = extract(F.columnRangeChart).model;
+      expect(m.series[0]!.kind).toBe('columnrange');
+      expect(m.series[0]!.points.map((p) => [p.low, p.high, p.y])).toEqual([
+        [-9.5, 8, null],
+        [-7.8, 8.3, null],
+        [-13.1, 9.2, null],
+      ]);
+      expect(m.series[0]!.bars).not.toBeNull();
+      expect(codes(m)).not.toContain('NON_NUMERIC_VALUE');
+    });
+
+    it('lang separators that differ from Excel raise APPROXIMATED_NUMBER_FORMAT once per chart', () => {
+      const fixture = {
+        ...F.multiLine,
+        lang: { thousandsSep: '.', decimalPoint: ',' },
+        plotOptions: { series: { dataLabels: { enabled: true, format: '{y:,.1f}' } } },
+      };
+      for (const m of [extract(fixture).model, extractChartModelFromOptions(fixture, opts())]) {
+        const approx = m.warnings.filter((w) => w.code === 'APPROXIMATED_NUMBER_FORMAT');
+        expect(approx.map((w) => w.property).sort()).toEqual(['lang.decimalPoint', 'lang.thousandsSep']);
+      }
+    });
+
+    it('a space thousands separator only matters for formats that group digits', () => {
+      const grouped = {
+        ...F.simpleLine,
+        lang: { thousandsSep: ' ' },
+        plotOptions: { series: { dataLabels: { enabled: true, format: '{y:,.0f}' } } },
+      };
+      const plain = {
+        ...grouped,
+        plotOptions: { series: { dataLabels: { enabled: true, format: '{y:.1f}' } } },
+      };
+      const props = (m: ChartModel): string[] =>
+        m.warnings.filter((w) => w.code === 'APPROXIMATED_NUMBER_FORMAT').map((w) => w.property);
+      expect(props(extractChartModelFromOptions(grouped, opts()))).toEqual(['lang.thousandsSep']);
+      expect(props(extractChartModelFromOptions(plain, opts()))).toEqual([]);
+    });
+
+    it('cssVariables overrides resolve styled-mode colors headless without STYLED_MODE_FALLBACK', () => {
+      const cssVariables = {
+        '--highcharts-color-0': '#8e44ad',
+        '--highcharts-color-1': '#16a085',
+        '--highcharts-background-color': '#fafafa',
+      };
+      for (const m of [
+        extract(F.styledMode, { cssVariables }).model,
+        extractChartModelFromOptions(F.styledMode, opts({ cssVariables })),
+      ]) {
+        expect(m.series.map((s) => hex(s.color))).toEqual(['#8e44ad', '#16a085']);
+        expect(codes(m)).not.toContain('STYLED_MODE_FALLBACK');
+        expect(m.background).toMatchObject({ type: 'solid', color: { r: 0xfa, g: 0xfa, b: 0xfa } });
+        expect(hex(m.colors[0])).toBe('#8e44ad');
+      }
+      // A variable missing from the overrides keeps the fallback (and its diagnostic).
+      const partial = extract(F.styledMode, { cssVariables: { '--highcharts-color-0': '#8e44ad' } }).model;
+      expect(partial.series.map((s) => hex(s.color))).toEqual(['#8e44ad', '#544fc5']);
+      expect(codes(partial)).toContain('STYLED_MODE_FALLBACK');
     });
   });
 }

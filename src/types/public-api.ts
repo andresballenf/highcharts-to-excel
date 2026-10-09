@@ -60,6 +60,13 @@ export interface ThemeOverrides {
   gridLineWidth?: number;
   /** Per-series overrides keyed by series index. */
   series?: Record<number, { color?: string; lineWidth?: number; fillOpacity?: number }>;
+  /**
+   * CSS custom property values for styled-mode charts, e.g. `{ '--highcharts-color-0': '#8e44ad' }`.
+   * Consulted first when resolving `var(--…)` colors (headless and in a browser), so a server-side
+   * export of a styled-mode chart can reproduce the app's theme; `STYLED_MODE_FALLBACK` is not
+   * raised for series whose color variables all come from here.
+   */
+  cssVariables?: Record<string, string>;
 }
 
 export interface ExportHooks {
@@ -68,6 +75,21 @@ export interface ExportHooks {
    * Must not mutate the Highcharts chart.
    */
   transformModel?: (model: ChartModel) => ChartModel;
+}
+
+/** Export phases reported by `ExportOptions.onProgress`, in order. */
+export type ExportPhase = 'extract' | 'translate' | 'write' | 'zip' | 'done';
+
+/**
+ * Progress of one export. `fraction` is the overall share done (0..1) and never decreases;
+ * `detail` says what is being worked on (e.g. `sheet "Data"`, or the zip path taken).
+ * Reported at least at the start of every phase and after every write chunk; 'done' (1) comes
+ * once, last, after a successful export.
+ */
+export interface ExportProgress {
+  phase: ExportPhase;
+  fraction: number;
+  detail?: string;
 }
 
 export interface ExportOptions {
@@ -117,6 +139,17 @@ export interface ExportOptions {
   hooks?: ExportHooks;
   /** Workbook document properties. */
   properties?: { title?: string; creator?: string };
+  /**
+   * Cancels the export. Checked between phases and between write chunks (and it terminates the
+   * worker zip); once aborted the export rejects with ExportError ABORTED whose `cause` is
+   * `signal.reason`. `downloadHighchartsAsXlsx` never downloads after an abort.
+   */
+  signal?: AbortSignal;
+  /**
+   * Receives progress events (see `ExportProgress`). Called synchronously; keep it cheap. Errors it
+   * throws abort the export and propagate unwrapped.
+   */
+  onProgress?: (progress: ExportProgress) => void;
 }
 
 export interface ExportTimings {
@@ -126,6 +159,11 @@ export interface ExportTimings {
   writeMs: number;
   /** Rendering the optional reference image (`includeReferenceImage`); 0 when none was rendered. */
   imageMs?: number;
+  /**
+   * Compressing the package, part of `writeMs` (which covers serializing and zipping). 0 when a
+   * custom writer reports no 'zip' progress.
+   */
+  zipMs: number;
   totalMs: number;
 }
 
@@ -148,7 +186,7 @@ export interface MultiChartExportEntry {
    * overrides the workbook-wide one. `writer` and `includeModel` are workbook-level concerns and
    * are not accepted here (pass the writer in `exportChartsToWorkbook`'s second argument).
    */
-  options?: Omit<ExportOptions, 'filename' | 'properties' | 'writer' | 'includeModel'>;
+  options?: Omit<ExportOptions, 'filename' | 'properties' | 'writer' | 'includeModel' | 'signal' | 'onProgress'>;
 }
 
 export interface MultiChartExportResult {
@@ -158,11 +196,84 @@ export interface MultiChartExportResult {
   charts: Array<{ chartSheetName: string; dataSheetName: string; warnings: Diagnostic[]; report: CompatibilityReport }>;
 }
 
+/**
+ * Icon shown before the menu item text.
+ * - `'excel'`: the built-in 14x14 spreadsheet glyph (`MENU_ICON_EXCEL_SVG`, drawn in `currentColor`).
+ * - `{ svg }`: your own inline `<svg …>…</svg>` markup.
+ * - `{ html }`: any other markup (an `<img>`, a `<span>` badge…).
+ * - `null`: no icon (default).
+ *
+ * Markup is rendered by Highcharts' AST, which drops tags and attributes outside
+ * `Highcharts.AST.allowedTags` / `allowedAttributes` (notably `viewBox` and `rx` are not allowed:
+ * size the SVG with `width`/`height` and draw in pixel coordinates).
+ */
+export type MenuIconOption = 'excel' | { svg: string } | { html: string } | null;
+
+/**
+ * Global options for Highcharts' context (hamburger) button, written to
+ * `exporting.buttons.contextButton` while installed and restored by `uninstall()`.
+ * Applies to every chart; set `exporting.buttons.contextButton` in a chart's own options to
+ * change a single chart.
+ */
+export interface ContextButtonOptions {
+  /** Name of a symbol registered on the Highcharts renderer (`'menu'`, `'menuball'`, `'circle'`…). */
+  symbol?: string;
+  /**
+   * A custom icon as an SVG path, registered as a renderer symbol named `symbol` (default
+   * `'editableExcelButton'`). Either a `d` string or a flat array (`['M', 0, 0, 'L', 1, 1]`).
+   * Commands M, L, H, V, C, Q, A and Z, absolute or relative (S, T are not supported). Coordinates
+   * all within 0..1 are a unit box; otherwise the path's bounding box (made square, centered) is
+   * scaled to the button's `symbolSize`.
+   */
+  svgPath?: string | Array<string | number>;
+  /** Symbol fill (Highcharts default `#666666`). */
+  symbolFill?: string;
+  /** Symbol stroke color (Highcharts default `#666666`). */
+  symbolStroke?: string;
+  /** Symbol stroke width (Highcharts default 3). */
+  symbolStrokeWidth?: number;
+  /** Symbol box size in px (Highcharts default 14). */
+  symbolSize?: number;
+  /** SVG attributes of the button box (`fill`, `stroke`, `r`, `states.hover.fill`…). */
+  theme?: Record<string, unknown>;
+  /** Text drawn next to the symbol. */
+  text?: string;
+  /** Extra class name, added to Highcharts' `highcharts-contextbutton`. */
+  className?: string;
+  /** Button tooltip; sets `lang.contextButtonTitle`. */
+  title?: string;
+}
+
+/** CSS declarations (camelCase keys) for the dropdown menu, as in Highcharts' `navigation.menuStyle`. */
+export type MenuCssOptions = Record<string, string | number>;
+
 export interface InstallOptions {
-  /** Menu item text. Default "Download editable Excel chart". */
+  /**
+   * Menu item text for every chart. Default: none, the text then comes from
+   * `Highcharts.getOptions().lang[langKey]` (default "Download editable Excel chart").
+   * Resolution order: per-chart `exporting.editableExcel.menuText` → this option →
+   * `lang[langKey]` → `DEFAULT_MENU_TEXT`. May contain markup allowed by Highcharts' AST.
+   */
   menuText?: string;
   /** Key used in exporting.menuItemDefinitions. Default "downloadEditableXLSX". */
   menuItemKey?: string;
+  /**
+   * The `lang` key holding the item text (the definition's `textKey`). Default
+   * `'downloadEditableXLSX'`. Translate with `Highcharts.setOptions({ lang: { [langKey]: '…' } })`
+   * before or after install (charts created afterwards pick it up). When the key is absent, install
+   * registers `DEFAULT_MENU_TEXT` under it and `uninstall()` removes it again.
+   */
+  langKey?: string;
+  /** Icon before the menu item text. Default `null` (no icon). Per chart: `exporting.editableExcel.menuIcon`. */
+  menuIcon?: MenuIconOption;
+  /** Context-button branding (symbol, colors, custom SVG path, title). Default: Highcharts' button unchanged. */
+  button?: ContextButtonOptions;
+  /** Merged into `navigation.menuStyle` (the dropdown box). Ignored in styled mode (use CSS). */
+  menuStyle?: MenuCssOptions;
+  /** Merged into `navigation.menuItemStyle` (every menu entry). Ignored in styled mode. */
+  menuItemStyle?: MenuCssOptions;
+  /** Merged into `navigation.menuItemHoverStyle` (entry under the pointer). Ignored in styled mode. */
+  menuItemHoverStyle?: MenuCssOptions;
   /** Default export options applied to every chart. */
   exportOptions?: ExportOptions;
   /**
@@ -183,13 +294,25 @@ export interface InstallOptions {
 export interface PerChartExportConfig extends ExportOptions {
   /** Set false to omit the menu item on this chart. */
   enabled?: boolean;
+  /** Item text for this chart; wins over the install `menuText` and `lang`. */
   menuText?: string;
+  /** Icon for this chart; overrides the install `menuIcon` (`null` removes it). */
+  menuIcon?: MenuIconOption;
 }
 
 export interface Installation {
-  /** Removes the menu item definition and the global default menu entry. Charts created later are unaffected. */
+  /**
+   * Removes the menu item definition and the global default menu entry, and restores every global
+   * option the install changed (`lang[langKey]` when it added it, `lang.contextButtonTitle`,
+   * the context button, `navigation` menu styles, the custom symbol). Charts created later are
+   * unaffected; charts already rendered keep their menu.
+   */
   uninstall(): void;
   readonly options: Readonly<InstallOptions>;
+  /** The `lang` key the item text is read from. */
+  readonly langKey: string;
+  /** The key in `exporting.menuItemDefinitions` / `menuItems`. */
+  readonly menuItemKey: string;
 }
 
 export type ExportErrorCode =
@@ -198,7 +321,9 @@ export type ExportErrorCode =
   | 'EXPORTING_MODULE_MISSING'
   | 'BROWSER_REQUIRED'
   | 'WRITER_FAILURE'
-  | 'INVALID_OPTIONS';
+  | 'INVALID_OPTIONS'
+  /** `signal` was aborted; `error.cause` is `signal.reason`. */
+  | 'ABORTED';
 
 export interface ExportErrorDetails {
   chartId?: string | null;
@@ -227,6 +352,22 @@ export const XLSX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.spr
 
 export const DEFAULT_MENU_TEXT = 'Download editable Excel chart';
 export const DEFAULT_MENU_ITEM_KEY = 'downloadEditableXLSX';
+/** Default `InstallOptions.langKey`: the `lang` entry holding the menu item text. */
+export const DEFAULT_LANG_KEY = 'downloadEditableXLSX';
+/** Renderer symbol name registered for `button.svgPath` when `button.symbol` is not given. */
+export const DEFAULT_BUTTON_SYMBOL = 'editableExcelButton';
+/**
+ * The built-in `menuIcon: 'excel'` glyph: a 14x14 spreadsheet (frame, header row, first column) in
+ * `currentColor`. Pixel coordinates and no `viewBox`, which Highcharts' AST does not allow.
+ */
+export const MENU_ICON_EXCEL_SVG =
+  '<svg class="hc-excel-menu-icon" width="14" height="14" aria-hidden="true" ' +
+  'style="vertical-align:-2px;margin-right:6px">' +
+  '<path d="M2.5 1.5H11.5A1 1 0 0 1 12.5 2.5V11.5A1 1 0 0 1 11.5 12.5H2.5A1 1 0 0 1 1.5 11.5V2.5A1 1 0 0 1 2.5 1.5Z" ' +
+  'fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+  '<path d="M1.5 5H12.5M1.5 8.75H12.5M5.25 5V12.5M8.75 5V12.5" fill="none" stroke="currentColor" stroke-width="1"/>' +
+  '<path d="M2 2H12V5H2Z" fill="currentColor" opacity="0.35"/>' +
+  '</svg>';
 
 const FIDELITY_MODES: readonly FidelityMode[] = ['best-effort', 'minimal'];
 const DATA_MODES: readonly DataMode[] = ['rendered', 'raw'];

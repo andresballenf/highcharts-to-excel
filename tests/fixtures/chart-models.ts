@@ -490,6 +490,12 @@ export function polarModel(): ChartModel {
   return { ...lineModel(), polar: true };
 }
 
+/** Polar columns: no Excel radar form, so still blocking. */
+export function polarColumnModel(): ChartModel {
+  const m = polarModel();
+  return { ...m, series: m.series.map((s) => ({ ...s, kind: 'column' as const, sourceType: 'column', marker: null })) };
+}
+
 export function emptyModel(): ChartModel {
   return baseModel();
 }

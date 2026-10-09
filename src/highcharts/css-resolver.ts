@@ -1,6 +1,7 @@
 /**
- * CSS custom property / computed style access. Only active in a real browser; headless callers
- * get `undefined` and `parseColor` then applies HIGHCHARTS_CSS_VARIABLE_DEFAULTS.
+ * CSS custom property / computed style access. Explicit overrides (`ThemeOverrides.cssVariables`)
+ * are consulted first, headless and in a browser; otherwise only a real browser resolves variables
+ * (headless callers get `undefined` and `parseColor` then applies HIGHCHARTS_CSS_VARIABLE_DEFAULTS).
  */
 
 import type { CssVariableResolver } from '../utils/colors';
@@ -11,13 +12,33 @@ function asElement(x: unknown): Element | undefined {
   return typeof Element !== 'undefined' && x instanceof Element ? x : undefined;
 }
 
-/** Resolves `--highcharts-*` (and any other) custom properties against the chart container. */
-export function createCssVariableResolver(chart: HcChartLike | undefined): CssVariableResolver {
-  if (!chart || !isRealBrowser()) return () => undefined;
+/** Non-empty string values of `overrides` keyed by custom property name (`--…` names only). */
+function overrideTable(overrides: Readonly<Record<string, string>> | undefined): Map<string, string> {
+  const table = new Map<string, string>();
+  if (!overrides || typeof overrides !== 'object') return table;
+  for (const [name, value] of Object.entries(overrides)) {
+    if (name.startsWith('--') && typeof value === 'string' && value.trim() !== '') table.set(name, value.trim());
+  }
+  return table;
+}
+
+/**
+ * Resolves `--highcharts-*` (and any other) custom properties: from `overrides` first, then (real
+ * browser only) against the chart container.
+ */
+export function createCssVariableResolver(
+  chart: HcChartLike | undefined,
+  overrides?: Readonly<Record<string, string>>,
+): CssVariableResolver {
+  const table = overrideTable(overrides);
+  const fromOverrides = (name: string): string | undefined => table.get(name);
+  if (!chart || !isRealBrowser()) return fromOverrides;
   const container = asElement(chart.container) ?? asElement(chart.renderTo);
-  if (!container) return () => undefined;
+  if (!container) return fromOverrides;
   const cache = new Map<string, string | undefined>();
   return (name: string) => {
+    const own = table.get(name);
+    if (own !== undefined) return own;
     if (cache.has(name)) return cache.get(name);
     let value: string | undefined;
     try {

@@ -83,3 +83,20 @@ Use ✅ / ❌ and put details in the notes column. File an issue for every ❌ w
 ## 5. LibreOffice renders are only a smoke check
 
 `tests/integration/render-libreoffice.test.ts` converts workbooks to PDF and PNG in `tests/output/render/` when `soffice`, `pdftoppm` and `pdftotext` are on the PATH. `tests/integration/writer-render.test.ts` does the same in `tests/output/writer/all-charts.pdf`. These renders show that the chart parts parse and draw. LibreOffice's chart engine is not Excel's, though: fonts, label placement, axis crossing and repair behaviour differ. For example, LibreOffice draws a rich chart title entirely in its first paragraph's style, so the subtitle line appears in the title font there. Excel honours the per-paragraph fonts, and that is what the checklist must confirm. A good LibreOffice render is **not** evidence that Excel accepts the file. Only the checklist above is.
+
+## 6. Automated validation layers, and what still needs a human in Excel
+
+Two layers check the package structure without Excel, plus one that watches the LibreOffice renders for unreviewed changes:
+
+| Layer | Command | Where it runs | What it catches |
+| --- | --- | --- | --- |
+| Schema validation (XSD) | `pnpm validate:xsd` | Locally, when `OOXML_SCHEMA_DIR` and `lxml` are available (section 4) | Every XML part against the ECMA-376 schemas: element order, unknown elements, value types. |
+| Open XML SDK validation | `pnpm validate:openxml` (after `pnpm test`) | CI job `openxml-validate`; locally with the .NET 8 SDK | `tools/ooxml-validator` opens each workbook with `SpreadsheetDocument.Open` from Microsoft's `DocumentFormat.OpenXml` and runs `OpenXmlValidator` for Office 2016: schema plus the SDK's semantic constraints (attribute ranges, relationship targets, part-to-part references, elements Office 2016 does not know). It prints `file: part: path: description [id]` per error and exits 1 on any. See `tools/ooxml-validator/README.md`. |
+| LibreOffice visual regression | `pnpm test:visual` | CI `verify` job, after coverage | Eight fixtures rendered by LibreOffice, cropped to the chart and compared with `tests/baselines/render/*.png` (pixelmatch threshold 0.1, at most 1.5% differing pixels). A change in what LibreOffice draws fails until someone reviews it and runs `UPDATE_BASELINES=1 pnpm test:visual`. It says nothing about Excel. |
+
+The Open XML SDK is the closest automated check to Excel's own parser, but it is not Excel: Excel's loader applies extra rules the SDK does not model, and it decides on its own when to show the repair prompt. A file that passes both layers can still be repaired or drawn differently by Excel. These still need a person with Excel (the checklist in section 2):
+
+- The file opens with no "We found a problem with some content" prompt, and no chart is dropped.
+- The chart looks right: colors, fonts and per-paragraph title fonts, label placement, axis crossing, log and date axes, gap/overlap, hole size.
+- The chart is editable: Select Data shows the Data sheet ranges, editing a cell redraws the chart, the series names come from cells.
+- Number formats, hidden-sheet behaviour and the Meta sheet read as intended.

@@ -174,12 +174,13 @@ describe('resolveChartType: unsupported and blocking', () => {
     expect(r.diagnostics[1]!.outcome).toBe('blocking');
   });
 
-  it('polar is blocking', () => {
-    const r = resolveChartType(F.polarModel());
+  it('polar columns are blocking; polar lines become a radar chart', () => {
+    const r = resolveChartType(F.polarColumnModel());
     expect(r.blocking).toBe(true);
     expect(r.diagnostics).toEqual([
       expect.objectContaining({ code: 'UNSUPPORTED_POLAR', outcome: 'blocking', property: 'chart.polar' }),
     ]);
+    expect(resolveChartType(F.polarModel())).toMatchObject({ blocking: false, excelChartType: 'radar' });
   });
 
   it('empty charts are blocking', () => {
@@ -234,7 +235,7 @@ describe('CHART_TYPE_MATRIX', () => {
     }
     expect(CHART_TYPE_MATRIX.find((e) => e.highcharts === 'pie + innerSize')?.excel).toBe('doughnut');
     for (const e of CHART_TYPE_MATRIX) expect(e.notes.length).toBeGreaterThan(10);
-    expect(CHART_TYPE_MATRIX.filter((e) => e.support === 'unsupported').length).toBeGreaterThanOrEqual(18);
+    expect(CHART_TYPE_MATRIX.filter((e) => e.support === 'unsupported').length).toBeGreaterThanOrEqual(14);
   });
 });
 

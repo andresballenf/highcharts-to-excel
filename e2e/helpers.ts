@@ -8,9 +8,15 @@ import type { Locator, Page } from '@playwright/test';
 export const HC = {
   root: '.highcharts-root',
   contextButton: '.highcharts-contextbutton',
+  buttonSymbol: '.highcharts-button-symbol',
   contextMenu: '.highcharts-contextmenu',
+  /** The <ul> inside the context menu: navigation.menuStyle is applied here. */
+  menuList: '.highcharts-menu',
   menuItem: '.highcharts-menu-item',
 } as const;
+
+/** The library's built-in `menuIcon: 'excel'` SVG. */
+export const EXCEL_MENU_ICON = 'svg.hc-excel-menu-icon';
 
 /** The demo card's chart container (`#chart-<name>`). */
 export function chartContainer(page: Page, name: string): Locator {
@@ -25,6 +31,16 @@ export function chartRoot(chart: Locator): Locator {
 /** The ☰ export menu button of a chart. */
 export function contextButton(chart: Locator): Locator {
   return chart.locator(HC.contextButton);
+}
+
+/** The <path> drawing a chart's context-button symbol. */
+export function buttonSymbol(chart: Locator): Locator {
+  return chart.locator(`${HC.contextButton} ${HC.buttonSymbol}`);
+}
+
+/** The open export menu's list (styled by navigation.menuStyle). */
+export function menuList(chart: Locator): Locator {
+  return chart.locator(`${HC.contextMenu} ${HC.menuList}`);
 }
 
 /** The open export menu of a chart. */

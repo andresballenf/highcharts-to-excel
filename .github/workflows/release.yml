@@ -1,11 +1,15 @@
 name: Release
 
+# Changesets flow: pushes to main open/refresh a "chore: release" PR that bumps the version and
+# CHANGELOG; merging that PR publishes to npm with provenance. No tag trigger (changeset publish
+# creates the tag itself, so a tag trigger would publish twice).
 on:
   push:
-    tags: ['v*']
+    branches: [main]
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
   id-token: write # npm provenance
 
 concurrency:
@@ -13,11 +17,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -25,9 +31,14 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-      - run: pnpm pack-check --no-build
-      - name: Publish to npm with provenance
-        run: pnpm publish --no-git-checks --provenance --access public
+      - name: Create release PR or publish
+        uses: changesets/action@v1
+        with:
+          version: pnpm run version
+          publish: pnpm release
+          title: 'chore: release'
+          commit: 'chore: release'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'

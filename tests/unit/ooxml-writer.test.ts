@@ -1,8 +1,27 @@
-import { describe, expect, it } from 'vitest';
-import { createDefaultExcelWriter, OoxmlExcelWriter } from '../../src/excel/ooxml-writer';
-import type { WorkbookSpec } from '../../src/excel/writer-interface';
+import { createHash } from 'node:crypto';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  createDefaultExcelWriter,
+  OoxmlExcelWriter,
+  resetWorkerProbe,
+  resolveZipMode,
+  ZIP_DETAIL,
+} from '../../src/excel/ooxml-writer';
+import type { WorkbookSpec, WriteProgress } from '../../src/excel/writer-interface';
 import { elementOrder, inspectXlsx, type XlsxInspection } from '../helpers/inspect-xlsx';
-import { CAT_F, NAME1_F, NAME2_F, PNG_1X1, VAL1_F, VAL2_F, chartSpecs, fullWorkbook } from '../fixtures/writer-specs';
+import {
+  CAT_F,
+  NAME1_F,
+  NAME2_F,
+  PNG_1X1,
+  VAL1_F,
+  VAL2_F,
+  axis,
+  chart,
+  chartSpecs,
+  fullWorkbook,
+  series,
+} from '../fixtures/writer-specs';
 
 async function build(wb: WorkbookSpec = fullWorkbook()): Promise<{ bytes: Uint8Array; x: XlsxInspection }> {
   const bytes = await new OoxmlExcelWriter().write(wb);
@@ -428,5 +447,309 @@ describe('OoxmlExcelWriter – invalid input', () => {
     const img = wb3.sheets[1]!.drawings.find((d) => d.kind === 'image')!;
     if (img.kind === 'image') img.png = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     await expect(w.write(wb3)).rejects.toThrow(/not a PNG/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Chunked writing: golden bytes, zip mode, abort, progress, yielding
+// ---------------------------------------------------------------------------
+
+/**
+ * A Data sheet of `n` rows (strings, numbers, NaN, -0, blanks, booleans, a shared date style) and a
+ * Chart sheet with a line chart (string categories) and a scatter chart (numeric X), whose caches
+ * hold `n` points each. Large enough to cross many 2,000-item chunk boundaries and to make the
+ * worksheet and chart parts exceed fflate's 160,000-byte worker threshold.
+ */
+function largeWorkbook(n = 25_000): WorkbookSpec {
+  const date = { numberFormat: 'yyyy-mm-dd' };
+  const header = { bold: true, fillHex: 'DDEBF7' };
+  const rows: WorkbookSpec['sheets'][number]['rows'] = [
+    {
+      row0: 0,
+      cells: ['Label', 'Sales', 'Costs', 'Date', 'Flag'].map((t, c) => ({
+        col0: c,
+        row0: 0,
+        value: { type: 'string' as const, value: t },
+        style: header,
+      })),
+    },
+  ];
+  const cats: Array<string | null> = [];
+  const xs: number[] = [];
+  const v1: Array<number | null> = [];
+  const v2: Array<number | null> = [];
+  for (let i = 0; i < n; i++) {
+    const r = i + 1;
+    const label = i % 97 === 0 ? null : `P${i} & <${i % 7}>`;
+    const a = i % 50 === 0 ? Number.NaN : Math.round(Math.sin(i / 40) * 5_000) / 100;
+    const b = i % 333 === 0 ? -0 : (i * 7) % 1_000;
+    cats.push(label);
+    xs.push(i / 4);
+    v1.push(Number.isNaN(a) ? null : a);
+    v2.push(b);
+    rows.push({
+      row0: r,
+      cells: [
+        label === null
+          ? { col0: 0, row0: r, value: { type: 'blank' } }
+          : { col0: 0, row0: r, value: { type: 'string', value: label } },
+        { col0: 1, row0: r, value: { type: 'number', value: a } },
+        { col0: 2, row0: r, value: { type: 'number', value: b } },
+        { col0: 3, row0: r, value: { type: 'number', value: 45_000 + i }, style: date },
+        ...(i % 3 === 0 ? [{ col0: 4, row0: r, value: { type: 'boolean' as const, value: i % 2 === 0 } }] : []),
+      ],
+    });
+  }
+  const last = n + 1;
+  const ref = (col: string) => `'Data'!$${col}$2:$${col}$${last}`;
+  const line = chart(
+    [
+      {
+        kind: 'line',
+        grouping: 'standard',
+        varyColors: false,
+        showMarkers: false,
+        axisIds: [100, 200],
+        dataLabels: null,
+        series: [
+          series(0, {
+            categories: { kind: 'str', formula: ref('A'), cache: cats },
+            values: { formula: ref('B'), cache: v1 },
+          }),
+          series(1, {
+            categories: { kind: 'str', formula: ref('A'), cache: cats },
+            values: { formula: ref('C'), cache: v2, formatCode: '0.0' },
+          }),
+        ],
+      },
+    ],
+    [axis(100, 'cat', 200), axis(200, 'val', 100)],
+  );
+  const scatter = chart(
+    [
+      {
+        kind: 'scatter',
+        scatterStyle: 'lineMarker',
+        varyColors: false,
+        axisIds: [300, 400],
+        dataLabels: null,
+        series: [
+          series(0, {
+            categories: { kind: 'num', formula: ref('D'), cache: xs },
+            values: { formula: ref('C'), cache: v2 },
+          }),
+        ],
+      },
+    ],
+    [axis(300, 'val', 400, { position: 'b' }), axis(400, 'val', 300)],
+  );
+  return {
+    properties: { title: 'Large', creator: 'vitest', created: new Date('2024-05-06T07:08:09.123Z') },
+    sheets: [
+      {
+        name: 'Data',
+        hidden: false,
+        columns: [{ col0: 0, widthChars: 20 }],
+        rows,
+        freezeHeaderRow: true,
+        drawings: [],
+      },
+      {
+        name: 'Chart',
+        hidden: false,
+        columns: [],
+        rows: [],
+        freezeHeaderRow: false,
+        drawings: [line, scatter].map((c, i) => ({
+          kind: 'chart' as const,
+          chart: c,
+          name: `Chart ${i + 1}`,
+          anchor: { col0: 1, row0: 1 + i * 22, colOffsetPx: 0, rowOffsetPx: 0, widthPx: 600, heightPx: 400 },
+        })),
+      },
+    ],
+  };
+}
+
+const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+
+/** Fixture specs → sha256 of the package, captured with the pre-chunking writer (zipSync, one pass). */
+const GOLDEN: Record<string, { spec: () => WorkbookSpec; sha256: string }> = {
+  fullWorkbook: {
+    spec: () => fullWorkbook(),
+    sha256: '87865b893d6f0a50670189df6c3d72200c960560bbc7b4adaf0efc13031a5063',
+  },
+  allCharts: {
+    spec: () => fullWorkbook({ charts: Object.values(chartSpecs).map((make) => make()), image: false }),
+    sha256: '637a7c76bc69d42ee1521c46556555e657cb6c326027a2918baf152da9d9f358',
+  },
+  large25k: { spec: () => largeWorkbook(), sha256: '34bbe3102f7b9bdf445f5a5dbb5bc6ec33630f93a33f318593ecc6429cb5c22c' },
+};
+
+describe('OoxmlExcelWriter – golden bytes', () => {
+  it.each(Object.keys(GOLDEN))('%s matches the pre-chunking bytes', async (name) => {
+    const { spec, sha256: expected } = GOLDEN[name]!;
+    const bytes = await new OoxmlExcelWriter().write(spec());
+    expect(sha256(bytes)).toBe(expected);
+  });
+});
+
+/** A stand-in for the browser `Worker` that answers the writer's start-up probe (or fails it). */
+function fakeWorkerClass(behaviour: 'message' | 'error' | 'throw') {
+  return class FakeWorker {
+    onmessage: ((e: unknown) => void) | null = null;
+    onerror: ((e: unknown) => void) | null = null;
+    constructor() {
+      if (behaviour === 'throw') throw new Error('blocked by CSP');
+      setTimeout(() => (behaviour === 'message' ? this.onmessage?.({ data: 1 }) : this.onerror?.({})), 1);
+    }
+    postMessage(): void {}
+    terminate(): void {}
+  };
+}
+
+describe('OoxmlExcelWriter – zip mode', () => {
+  const hadCreateObjectURL = typeof URL.createObjectURL === 'function';
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetWorkerProbe();
+    if (!hadCreateObjectURL) delete (URL as { createObjectURL?: unknown }).createObjectURL;
+  });
+  const stubBlobUrls = () => {
+    if (!hadCreateObjectURL) (URL as { createObjectURL?: unknown }).createObjectURL = () => 'blob:probe';
+  };
+  const zipDetail = async (writer: OoxmlExcelWriter, spec: WorkbookSpec): Promise<string | undefined> => {
+    const events: WriteProgress[] = [];
+    await writer.write(spec, { onProgress: (p) => events.push(p) });
+    return events.find((e) => e.phase === 'zip')?.detail;
+  };
+
+  it("'auto' (the default) zips synchronously under jsdom, which has no Worker", async () => {
+    expect(typeof (globalThis as { Worker?: unknown }).Worker).toBe('undefined');
+    expect(await resolveZipMode('auto', 50_000_000)).toBe('sync');
+    expect(await zipDetail(new OoxmlExcelWriter(), largeWorkbook(3_000))).toBe(ZIP_DETAIL.sync);
+  });
+
+  it("'auto' picks the worker zip only for large parts and only when a Blob worker starts", async () => {
+    stubBlobUrls();
+    vi.stubGlobal('Worker', fakeWorkerClass('message'));
+    expect(await resolveZipMode('auto', 1_000)).toBe('sync');
+    expect(await resolveZipMode('auto', 5_000_000)).toBe('async');
+    resetWorkerProbe();
+    vi.stubGlobal('Worker', fakeWorkerClass('error'));
+    expect(await resolveZipMode('auto', 5_000_000)).toBe('sync');
+    resetWorkerProbe();
+    vi.stubGlobal('Worker', fakeWorkerClass('throw'));
+    expect(await resolveZipMode('auto', 5_000_000)).toBe('sync');
+    expect(await resolveZipMode('sync', 5_000_000)).toBe('sync');
+  });
+
+  it("forcing 'async' without Web Workers rejects with a clear error", async () => {
+    await expect(new OoxmlExcelWriter({ zip: 'async' }).write(fullWorkbook())).rejects.toThrow(
+      /zip: 'async' needs Web Workers/,
+    );
+  });
+
+  it('the worker zip produces the same bytes as zipSync', async () => {
+    // Satisfies the guard only: under vitest fflate resolves to its Node build, whose async zip runs
+    // on worker_threads. The browser build (Blob URL workers) is exercised by the Playwright downloads.
+    vi.stubGlobal('Worker', class {});
+    const writer = new OoxmlExcelWriter({ zip: 'async' });
+    expect(await zipDetail(writer, largeWorkbook(3_000))).toBe(ZIP_DETAIL.async);
+    expect(sha256(await writer.write(GOLDEN.large25k!.spec()))).toBe(GOLDEN.large25k!.sha256);
+    expect(sha256(await writer.write(GOLDEN.fullWorkbook!.spec()))).toBe(GOLDEN.fullWorkbook!.sha256);
+  });
+
+  it('aborting during the worker zip terminates it and rejects with the reason', async () => {
+    vi.stubGlobal('Worker', class {});
+    const controller = new AbortController();
+    const reason = new Error('stop zipping');
+    const write = new OoxmlExcelWriter({ zip: 'async' }).write(largeWorkbook(), {
+      signal: controller.signal,
+      onProgress: (p) => {
+        if (p.phase === 'zip') controller.abort(reason);
+      },
+    });
+    await expect(write).rejects.toBe(reason);
+  });
+
+  it('rejects an unknown zip mode', () => {
+    expect(() => new OoxmlExcelWriter({ zip: 'fast' as 'sync' })).toThrow(/zip/);
+  });
+});
+
+describe('OoxmlExcelWriter – chunks, progress and abort', () => {
+  it.each(Object.keys(GOLDEN))('%s keeps its golden bytes when written in small chunks with progress', async (name) => {
+    const { spec, sha256: expected } = GOLDEN[name]!;
+    const events: WriteProgress[] = [];
+    const bytes = await new OoxmlExcelWriter().write(spec(), { yieldEvery: 700, onProgress: (p) => events.push(p) });
+    expect(sha256(bytes)).toBe(expected);
+    expect(events.length).toBeGreaterThan(1);
+  });
+
+  it('reports monotonic write progress per chunk, then zip, ending at 1', async () => {
+    const events: WriteProgress[] = [];
+    await new OoxmlExcelWriter().write(largeWorkbook(10_000), { yieldEvery: 2_000, onProgress: (p) => events.push(p) });
+    const write = events.filter((e) => e.phase === 'write');
+    const zip = events.filter((e) => e.phase === 'zip');
+    // 10,001 rows × ≤5 cells (grouped and emitted) + 3 × 10,000 cache points, in 2,000-item chunks.
+    expect(write.length).toBeGreaterThanOrEqual(30);
+    const lastWrite = events.map((e) => e.phase).lastIndexOf('write');
+    expect(events.findIndex((e) => e.phase === 'zip')).toBeGreaterThan(lastWrite);
+    for (const list of [write, zip]) {
+      for (let i = 1; i < list.length; i++) expect(list[i]!.fraction).toBeGreaterThanOrEqual(list[i - 1]!.fraction);
+      for (const e of list) expect(e.fraction).toBeGreaterThanOrEqual(0);
+      expect(list.at(-1)!.fraction).toBe(1);
+    }
+    expect(zip[0]!.fraction).toBe(0);
+  });
+
+  it('encodes large chart and sheet parts piece by piece, pausing without advancing the fraction', async () => {
+    const events: WriteProgress[] = [];
+    await new OoxmlExcelWriter().write(largeWorkbook(), { yieldEvery: 2_000, onProgress: (p) => events.push(p) });
+    // Encoding pauses report 0 new items, so they repeat the fraction of the event before.
+    const pauses = new Set(
+      events
+        .filter((e, i) => i > 0 && e.phase === 'write' && e.detail && e.fraction === events[i - 1]!.fraction)
+        .map((e) => e.detail),
+    );
+    expect(pauses).toEqual(new Set(['sheet "Data"', 'chart 1', 'chart 2']));
+  });
+
+  it('rejects with signal.reason when the signal is already aborted', async () => {
+    const reason = new Error('cancelled');
+    const progress = vi.fn();
+    await expect(
+      new OoxmlExcelWriter().write(fullWorkbook(), { signal: AbortSignal.abort(reason), onProgress: progress }),
+    ).rejects.toBe(reason);
+    expect(progress).not.toHaveBeenCalled();
+  });
+
+  it('stops between chunks when aborted mid-write and never zips', async () => {
+    const controller = new AbortController();
+    const events: WriteProgress[] = [];
+    const write = new OoxmlExcelWriter().write(largeWorkbook(10_000), {
+      signal: controller.signal,
+      yieldEvery: 1_000,
+      onProgress: (p) => {
+        events.push(p);
+        if (p.phase === 'write' && p.fraction > 0.3) controller.abort();
+      },
+    });
+    await expect(write).rejects.toMatchObject({ name: 'AbortError' });
+    const at = events.findIndex((e) => e.fraction > 0.3);
+    expect(events).toHaveLength(at + 1);
+    expect(events.some((e) => e.phase === 'zip')).toBe(false);
+  });
+
+  it('yields to the event loop between chunks in a browser-like environment (jsdom has window)', async () => {
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 1);
+    try {
+      await new OoxmlExcelWriter().write(largeWorkbook(), { yieldEvery: 2_000 });
+    } finally {
+      clearInterval(timer);
+    }
+    expect(ticks).toBeGreaterThan(0);
   });
 });

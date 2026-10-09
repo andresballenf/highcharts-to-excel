@@ -11,6 +11,8 @@ Outcomes:
 
 Severity defaults: `blocking` is `error`, `approximated` and `unsupported` are `warning`, and `translated` is `info`, unless the table says *(info)*.
 
+Versioning: diagnostic codes are append-only (a minor version can add codes; renaming or removing one is a major change). The tables below describe the current output (sheet names, cell layout, chart XML), which is documented but not covered by semver. See [Stability and versioning](../README.md#stability-and-versioning).
+
 Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwright) and LibreOffice (smoke render). **Not verified in Microsoft Excel.** See [manual-qa.md](manual-qa.md).
 
 ## Chart types
@@ -27,28 +29,28 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | pie + innerSize | doughnut | native | Hole size from innerSize (10-90%); multiple rings share one hole size. |
 | scatter | scatter | native | X/Y columns per series; marker-only unless lineWidth > 0. |
 | bubble | bubble | native | X/Y/Size columns per series; cannot be combined with other types. |
-| columnrange | - | unsupported | Excel has no floating range columns without helper series. |
-| arearange | - | unsupported | Excel has no band/range area type. |
+| columnrange | stacked column (hidden base) | approximated | Floating bars: a hidden base series stacked under a Range column (=High-Low formula cells, so editing Low/High updates the chart). Ranges crossing zero use Base/Up/Down helper columns. One range series per axis. |
+| arearange | stacked area (hidden base) | approximated | A hidden Low area with a Range area (=High-Low formula cells) stacked on top. One range series per axis. |
 | boxplot | - | unsupported | Excel box & whisker is a chartex type that cannot reference this layout. |
 | heatmap | - | unsupported | Excel has no heatmap chart (only conditional formatting). |
 | treemap | - | unsupported | Excel treemap is a chartex type not produced by this library. |
 | waterfall | - | unsupported | Excel waterfall is a chartex type not produced by this library. |
 | funnel | - | unsupported | Excel funnel is a chartex type not produced by this library. |
 | gauge | - | unsupported | Excel has no gauge chart. |
-| polar (any type) | - | unsupported | Excel radar charts do not match polar/spider geometry. |
+| polar (line/spline/area) | radar (marker/standard/filled) | approximated | Categories are spaced evenly around the circle and lines are straight. Polar columns/bars and other types stay blocking (Excel has no polar columns). |
 | variablepie | - | unsupported | Excel pies cannot vary slice radius. |
 | sankey | - | unsupported | Excel has no flow diagrams. |
 | networkgraph | - | unsupported | Excel has no network/graph layout chart. |
 | timeline | - | unsupported | Excel has no timeline chart type. |
 | histogram | - | unsupported | Excel histogram is a chartex type computed from raw data, not from this series. |
 | bellcurve | - | unsupported | Derived series (computed in the browser) with no Excel equivalent. |
-| errorbar | - | unsupported | Excel error bars are attached to another series, not standalone series. |
+| errorbar | error bars (custom) | approximated | Drawn as custom Excel error bars on the linked parent series (bar, line, area, scatter, bubble); +err/-err columns on the data sheet. Unlinked error bars are not exported. |
 | lollipop | - | unsupported | No Excel equivalent without helper series and error bars. |
 | dumbbell | - | unsupported | No Excel equivalent without helper series and high-low lines. |
 
 `report.excelChartType` names the result:
 
-- One plot group gives `line`, `column`, `bar`, `area`, `scatter`, `bubble`, `pie` or `doughnut`.
+- One plot group gives `line`, `column`, `bar`, `area`, `scatter`, `bubble`, `pie`, `doughnut`, `radar` or `filledRadar` (stacked types are prefixed, for example `stackedColumn` for a column range).
 - Stacking adds a prefix: `stacked*` or `percentStacked*`, for example `stackedColumn` or `percentStackedArea`.
 - Several groups give `combo:<a>+<b>`, for example `combo:column+line`.
 
@@ -62,12 +64,15 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | second and later plain `pie` series | approximated | `UNSUPPORTED_SERIES_TYPE` | Only the first pie is drawn. The others stay on the data sheet. |
 | `pie` + doughnut ring | approximated | `APPROXIMATED_CHART_TYPE` | The pie becomes the inner doughnut ring. |
 | doughnut ring `size` | approximated | `APPROXIMATED_LAYOUT` *(info)* | All rings have the same thickness. |
-| doughnut rings with different slice names | approximated | `APPROXIMATED_LAYOUT` | Rings share one category list: slice order follows the union of names, missing slices are empty. |
+| doughnut rings with different slice names or order | native | none | Each ring gets its own category column (`Category 1 \| Ring 1 \| Category 2 \| Ring 2 …`) and keeps its slices in its own order. Rings listing the same names in the same order share one `Category` column. LibreOffice labels every ring (and the legend) with the first ring's category names; Excel's legend also lists the first ring's categories (per-ring labels in Excel: unverified, see `docs/manual-qa.md`). |
 | `series[i].endAngle` (semi-circle) | approximated | `APPROXIMATED_CHART_TYPE` | Drawn as a full circle. |
 | `series[i].startAngle` | native | none | `firstSliceAngle`. |
 | `series[i].innerSize` | native | none | Hole size clamped to 10-90%. |
 | `data[j].sliced` | native | none | Explosion from `slicedOffset` relative to the chart size. |
-| `chart.polar` | blocking | `UNSUPPORTED_POLAR` | |
+| `chart.polar` (line, spline, area, areaspline) | approximated | `APPROXIMATED_CHART_TYPE` *(info)* | Excel radar chart on a category/value axis pair: `marker` style (markers on), `standard` (markers off) or `filled` (areas). Categories are spaced evenly around the circle. One radar style per chart: the first series decides (`APPROXIMATED_CHART_TYPE` for the others); stacking, smoothing and extra y axes are approximated. |
+| `chart.polar` (column, bar, other types) | blocking | `UNSUPPORTED_POLAR` | Excel has no polar columns. |
+| `series[i].type: 'errorbar'` + `linkedTo` | approximated | `UNSUPPORTED_SERIES_TYPE` when unlinked | Custom Excel error bars (`errBarType both`, `errValType cust`) on the parent series (bar, line, area, scatter, bubble): `<parent> +err` = high − y and `<parent> -err` = y − low columns next to the parent. `linkedTo: ':previous'` (the errorbar default) and ids are resolved. Error bars on pie, radar or range series, a second errorbar on one parent, or an unlinked errorbar are not exported. Error bar points without a parent point: `UNALIGNED_X_VALUES`. |
+| `series[i].type: 'columnrange'` / `'arearange'` | approximated | `APPROXIMATED_CHART_TYPE` *(info)* | Stacked column/bar/area with a hidden base series (no fill, no line, no legend entry). Data sheet: `<name> Low`, `<name> High`, `<name> Range` (formula cells `=High-Low` with cached values; editing Low/High updates the chart). A column range with a negative low uses `<name> Base` (`=MAX(0,Low)+MIN(0,High)`), `Up` (`=MAX(0,High)-MAX(0,Low)`) and `Down` (`=MIN(0,Low)-MIN(0,High)`) because Excel stacks negative values below the axis. Points without both ends get no range (empty cells). Data labels are not exported (`APPROXIMATED_DATA_LABELS`). A second range series, or plain series of the same type on the same axis: the range series is dropped (`UNSUPPORTED_SERIES_TYPE`). |
 | `chart.options3d.enabled` | approximated | `UNSUPPORTED_3D` | Exported flat. |
 | `chart.inverted` (line/area/scatter/bubble) | approximated | `APPROXIMATED_CHART_TYPE` | Excel cannot invert these. Inverted columns become horizontal bars (native). |
 | horizontal bars + line/area | approximated | `APPROXIMATED_CHART_TYPE` *(info)* | Lines follow the bar orientation. |
@@ -80,7 +85,7 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | plot area box (`plotLeft/Top/Width/Height`) | approximated | `APPROXIMATED_LAYOUT` *(info)* | Pinned as a manual layout, clipped to the chart area; not for pies; not in `fidelity: 'minimal'`. |
 | `chart.backgroundColor`, `borderColor`/`borderWidth` | native | `UNRESOLVED_COLOR` if unparseable | |
 | `chart.plotBackgroundColor`, `plotBorderColor`/`plotBorderWidth` | native | `UNRESOLVED_COLOR` if unparseable | |
-| `chart.styledMode` | approximated | `STYLED_MODE_FALLBACK` | Real browser: computed SVG colors. Headless: palette by `colorIndex`; background white. |
+| `chart.styledMode` | approximated | `STYLED_MODE_FALLBACK` | `themeOverrides.cssVariables` first (`--highcharts-color-<colorIndex % chart.colorCount>`, every slice variable for pies, `--highcharts-background-color`); no diagnostic when a series' variables all come from there. Otherwise real browser: computed SVG colors; headless: palette by `colorIndex`, background white. |
 | `title.text`, `title.style` | native | none | Also written to cell A1 of the chart sheet. |
 | `subtitle.text`, `subtitle.style` | approximated | `APPROXIMATED_LAYOUT` *(info)* | Second title paragraph in its own font (size, weight and color from the subtitle style). Used as the title when there is none. LibreOffice draws the whole title in the first paragraph's style; Excel honours per-paragraph fonts. |
 | `annotations` | unsupported | `UNSUPPORTED_ANNOTATION` | |
@@ -114,7 +119,7 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | `series[i].dataLabels.enabled` | native | none | Per-point `data[j].dataLabels.enabled: false` hides single labels. |
 | `dataLabels.format` (`{y}`, `{point.name}`, `{series.name}`, `{percentage}`, `{y:.1f}`…) | native / approximated | `APPROXIMATED_DATA_LABELS`, `UNSUPPORTED_NUMBER_FORMAT` | Mapped to show value, category, series name and percent plus an Excel number format. Literal text between parts becomes Excel's separator. Percentages show only on pie/doughnut; elsewhere a percentage-only label shows the value instead. |
 | `dataLabels.formatter` | unsupported | `UNSUPPORTED_FORMATTER` | Excel shows the raw value. |
-| `dataLabels.align/verticalAlign/inside/distance` | native / approximated | `APPROXIMATED_DATA_LABELS` | Mapped to an Excel position. Positions that the Excel chart type does not allow use the default. Outside end on stacked bars becomes inside end. Area and doughnut cannot be positioned *(info)*. |
+| `dataLabels.align/verticalAlign/inside/distance` | native / approximated | `APPROXIMATED_DATA_LABELS` | Mapped to an Excel position. Positions that the Excel chart type does not allow use the default. Outside end on stacked bars becomes inside end. Area, doughnut and radar cannot be positioned *(info)*. |
 | `dataLabels.style`, `backgroundColor`, `borderColor/Width` | native | `APPROXIMATED_FONT` for generic families | |
 
 ## Axes
@@ -168,7 +173,7 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | --- | --- | --- | --- |
 | `*.style.fontFamily` | native / approximated | `APPROXIMATED_FONT` | First usable family. System aliases are skipped. Generic families map to Office fonts (`sans-serif` → Arial and so on). |
 | `*.style.fontSize`, `fontWeight`, `fontStyle`, `color` | native | none | px × 0.75 = pt. `em` sizes are resolved against the chart font (default 16 px). |
-| `lang.thousandsSep`, `lang.decimalPoint` | not read | none | Excel always uses the viewer's locale separators. The translator has a diagnostic for this, but no extractor passes these options to it today. |
+| `lang.thousandsSep`, `lang.decimalPoint` | approximated | `APPROXIMATED_NUMBER_FORMAT` (once per chart, property `lang.thousandsSep` / `lang.decimalPoint`) | Excel always uses the viewer's locale separators. Reported only when a translated format actually groups digits (`{y:,.0f}`, `valueDecimals`) with a separator other than `,`, or shows decimals with a point other than `.`. Highcharts 11's default thousands separator is a space; Highcharts 12+ leaves it unset (locale), which is not reported. |
 
 ## Data
 

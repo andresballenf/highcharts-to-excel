@@ -150,13 +150,14 @@ describe('pie / doughnut layout', () => {
     expect(layoutOf(m).ranges[0]!.categories!.cache).toEqual(['Point 1', 'Point 2']);
   });
 
-  it('unions ring categories and maps every point to its row', () => {
+  it('gives rings with different slices their own category columns', () => {
     const l = layoutOf(F.doughnutModel());
-    expect(headerRow(l.sheet)).toEqual(['Category', 'Inner', 'Outer']);
-    expect(l.ranges[0]!.categories!.cache).toEqual(['A', 'B', 'C']);
-    expect(l.ranges[0]!.values.cache).toEqual([1, 2, null]);
-    expect(l.ranges[1]!.values.cache).toEqual([5, null, 6]);
-    expect(l.ranges[1]!.pointOffsets).toEqual([0, 2]);
+    expect(headerRow(l.sheet)).toEqual(['Category 1', 'Inner', 'Category 2', 'Outer']);
+    expect(l.ranges[0]!.categories!.cache).toEqual(['A', 'B']);
+    expect(l.ranges[1]!.categories!.cache).toEqual(['A', 'C']);
+    expect(l.ranges[0]!.values.cache).toEqual([1, 2]);
+    expect(l.ranges[1]!.values.cache).toEqual([5, 6]);
+    expect(l.ranges[1]!.pointOffsets).toEqual([0, 1]);
   });
 });
 
@@ -407,7 +408,7 @@ describe('audit fixes: alignment, label mode, duplicates, pre-1900 dates, doughn
     expect(l.ranges[0]!.categories).toEqual({ formula: 'Data!$A$2:$A$3', kind: 'num', cache: [-1, 1] });
   });
 
-  it('C9: doughnut rings with different key sets are reported', () => {
+  it('C9: doughnut rings with different key sets keep their own slices (no union, no diagnostic)', () => {
     const m = F.baseModel();
     m.xAxes = [];
     m.yAxes = [];
@@ -420,10 +421,11 @@ describe('audit fixes: alignment, label mode, duplicates, pre-1900 dates, doughn
       }),
     ];
     const l = layoutOf(m);
-    expect(l.ranges[0]!.categories!.cache).toEqual(['A', 'B', 'B1', 'C']);
-    const d = l.diagnostics.find((x) => x.code === 'APPROXIMATED_LAYOUT')!;
-    expect(d).toMatchObject({ outcome: 'approximated', severity: 'warning', property: 'series[1].data' });
-    expect(d.message).toContain('union');
-    expect(layoutOf(F.doughnutModel()).diagnostics.some((x) => x.code === 'APPROXIMATED_LAYOUT')).toBe(true);
+    expect(l.ranges[0]!.categories!.cache).toEqual(['A', 'B']);
+    expect(l.ranges[1]!.categories!.cache).toEqual(['B1', 'A', 'C']);
+    expect(l.ranges[1]!.values.cache).toEqual([1, 5, 2]);
+    expect(l.rowCount).toBe(3);
+    expect(l.diagnostics.some((x) => x.code === 'APPROXIMATED_LAYOUT')).toBe(false);
+    expect(layoutOf(F.doughnutModel()).diagnostics.some((x) => x.code === 'APPROXIMATED_LAYOUT')).toBe(false);
   });
 });

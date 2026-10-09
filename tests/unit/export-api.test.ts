@@ -6,12 +6,18 @@ import {
   ExportError,
   XLSX_MIME_TYPE,
   analyzeChartCompatibility,
+  downloadHighchartsAsXlsx,
   exportChartsToWorkbook,
   exportHighchartsOptionsToXlsx,
   exportHighchartsToXlsx,
 } from '../../src/index';
 import type { Diagnostic } from '../../src/types/diagnostics';
-import { resolveExportOptions, type ExportOptions, type MultiChartExportEntry } from '../../src/types/public-api';
+import {
+  resolveExportOptions,
+  type ExportOptions,
+  type ExportProgress,
+  type MultiChartExportEntry,
+} from '../../src/types/public-api';
 import * as F from '../fixtures/highcharts-options';
 import { inspectXlsx } from '../helpers/inspect-xlsx';
 import { destroyAll, renderChart, type HighchartsLike } from '../helpers/render-chart';
@@ -80,15 +86,18 @@ describe('exportHighchartsToXlsx (Highcharts 13)', () => {
     await expectExportError(exportHighchartsToXlsx(null), 'INVALID_CHART');
   });
 
-  it('throws CHART_NOT_EDITABLE for a polar chart even without strictMode', async () => {
-    const chart = render(F.polarChart);
+  it('throws CHART_NOT_EDITABLE for a polar column chart even without strictMode', async () => {
+    const chart = render(F.polarColumnChart);
     const error = await expectExportError(exportHighchartsToXlsx(chart), 'CHART_NOT_EDITABLE');
     expect(error.details.diagnostics?.some((d) => d.code === 'UNSUPPORTED_POLAR')).toBe(true);
     expect(error.message).toContain('UNSUPPORTED_POLAR');
   });
 
-  it('strictMode throws CHART_NOT_EDITABLE for polar and unknown-only charts, not for a plain line chart', async () => {
-    await expectExportError(exportHighchartsToXlsx(render(F.polarChart), { strictMode: true }), 'CHART_NOT_EDITABLE');
+  it('strictMode throws CHART_NOT_EDITABLE for polar column and unknown-only charts, not for a plain line chart', async () => {
+    await expectExportError(
+      exportHighchartsToXlsx(render(F.polarColumnChart), { strictMode: true }),
+      'CHART_NOT_EDITABLE',
+    );
     await expectExportError(
       exportHighchartsToXlsx(render(F.unsupportedType), { strictMode: true }),
       'CHART_NOT_EDITABLE',
@@ -163,8 +172,20 @@ describe('analyzeChartCompatibility (Highcharts 13)', () => {
     expect(report.supported.length).toBeGreaterThan(0);
   });
 
-  it('reports polar as not editable without throwing', () => {
-    const report = analyzeChartCompatibility(render(F.polarChart));
+  it('reports a polar line chart as an editable Excel radar chart', async () => {
+    const chart = render(F.polarChart);
+    const report = analyzeChartCompatibility(chart);
+    expect(report.editable).toBe(true);
+    expect(report.excelChartType).toBe('radar');
+    expect(report.warnings).toContainEqual(
+      expect.objectContaining({ code: 'APPROXIMATED_CHART_TYPE', property: 'chart.polar', severity: 'info' }),
+    );
+    const result = await exportHighchartsToXlsx(chart, { strictMode: true });
+    expect(result.report.excelChartType).toBe('radar');
+  });
+
+  it('reports polar columns as not editable without throwing', () => {
+    const report = analyzeChartCompatibility(render(F.polarColumnChart));
     expect(report.editable).toBe(false);
     expect(report.excelChartType).toBeNull();
     expect(report.blocking.length).toBeGreaterThan(0);
@@ -230,7 +251,7 @@ describe('exportChartsToWorkbook (Highcharts 13)', () => {
 
   it('names the entry index when a chart is not editable', async () => {
     const error = await expectExportError(
-      exportChartsToWorkbook([{ chart: render(F.simpleLine) }, { chart: render(F.polarChart) }]),
+      exportChartsToWorkbook([{ chart: render(F.simpleLine) }, { chart: render(F.polarColumnChart) }]),
       'CHART_NOT_EDITABLE',
     );
     expect(error.message).toContain('entry 1');
@@ -239,7 +260,9 @@ describe('exportChartsToWorkbook (Highcharts 13)', () => {
   it('A5 checks blocking before rendering the reference image (multi-chart path)', async () => {
     const onWarning = vi.fn();
     await expectExportError(
-      exportChartsToWorkbook([{ chart: render(F.polarChart), options: { includeReferenceImage: true, onWarning } }]),
+      exportChartsToWorkbook([
+        { chart: render(F.polarColumnChart), options: { includeReferenceImage: true, onWarning } },
+      ]),
       'CHART_NOT_EDITABLE',
     );
     expect(onWarning.mock.calls.map(([d]) => (d as Diagnostic).code)).not.toContain('WRITER_LIMITATION');
@@ -270,7 +293,7 @@ describe('export pipeline audit fixes (Highcharts 13)', () => {
   it('A5 checks blocking before rendering the reference image and times the image separately', async () => {
     const onWarning = vi.fn();
     await expectExportError(
-      exportHighchartsToXlsx(render(F.polarChart), { includeReferenceImage: true, onWarning }),
+      exportHighchartsToXlsx(render(F.polarColumnChart), { includeReferenceImage: true, onWarning }),
       'CHART_NOT_EDITABLE',
     );
     expect(onWarning.mock.calls.map(([d]) => (d as Diagnostic).code)).not.toContain('WRITER_LIMITATION');
@@ -347,5 +370,177 @@ describe('resolveExportOptions validation (A2)', () => {
       exportChartsToWorkbook([{ chart: null }], { writer: {} as unknown as typeof writer }),
       'INVALID_OPTIONS',
     );
+  });
+});
+
+describe('cancellation, progress and timings (Highcharts 13)', () => {
+  afterEach(() => destroyAll());
+
+  /** Plain options with `n` points per series: big enough for several write chunks, no rendering. */
+  const bigOptions = (n = 12_000, seriesCount = 2) => ({
+    title: { text: 'Big' },
+    series: Array.from({ length: seriesCount }, (_, s) => ({
+      type: 'line',
+      name: `S${s}`,
+      data: Array.from({ length: n }, (_, i) => (i * (s + 1)) % 97),
+    })),
+  });
+
+  it('rejects with ABORTED (cause = signal.reason) when the signal is already aborted, before any work', async () => {
+    const writer = await import('../../src/excel/ooxml-writer');
+    const write = vi.spyOn(writer.OoxmlExcelWriter.prototype, 'write');
+    const reason = new Error('user cancelled');
+    const onProgress = vi.fn();
+    const error = await expectExportError(
+      exportHighchartsToXlsx(render(F.simpleLine), { signal: AbortSignal.abort(reason), onProgress }),
+      'ABORTED',
+    );
+    expect(error.cause).toBe(reason);
+    expect(write).not.toHaveBeenCalled();
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it('aborts between write chunks: ABORTED, no zip phase, no further progress', async () => {
+    const controller = new AbortController();
+    const phases: string[] = [];
+    const error = await expectExportError(
+      exportHighchartsOptionsToXlsx(bigOptions(), {
+        signal: controller.signal,
+        onProgress: (p) => {
+          phases.push(p.phase);
+          if (p.phase === 'write' && phases.filter((x) => x === 'write').length === 3) controller.abort();
+        },
+      }),
+      'ABORTED',
+    );
+    expect((error.cause as DOMException).name).toBe('AbortError');
+    expect(phases.filter((x) => x === 'write')).toHaveLength(3);
+    expect(phases).not.toContain('zip');
+    expect(phases).not.toContain('done');
+  });
+
+  it('checks the signal after a custom writer that ignores it', async () => {
+    const controller = new AbortController();
+    const writer = {
+      name: 'ignores-signal',
+      write: async () => {
+        controller.abort('late');
+        return new Uint8Array([1]);
+      },
+    };
+    const error = await expectExportError(
+      exportHighchartsToXlsx(render(F.simpleLine), { signal: controller.signal, writer }),
+      'ABORTED',
+    );
+    expect(error.cause).toBe('late');
+  });
+
+  it('passes the signal and a progress callback to the writer', async () => {
+    const seen: unknown[] = [];
+    const writer = {
+      name: 'spy',
+      write: async (_spec: unknown, ctx?: unknown) => {
+        seen.push(ctx);
+        return new Uint8Array([1]);
+      },
+    };
+    const controller = new AbortController();
+    await exportHighchartsToXlsx(render(F.simpleLine), { signal: controller.signal, writer });
+    expect(seen[0]).toMatchObject({ signal: controller.signal });
+    expect(typeof (seen[0] as { onProgress?: unknown }).onProgress).toBe('function');
+  });
+
+  it('emits progress for every phase with a monotonic overall fraction from 0 to 1', async () => {
+    const events: ExportProgress[] = [];
+    const result = await exportHighchartsOptionsToXlsx(bigOptions(), { onProgress: (p) => events.push(p) });
+    expect(result.bytes.byteLength).toBeGreaterThan(0);
+    const phases = events.map((e) => e.phase);
+    expect(phases[0]).toBe('extract');
+    expect(events[0]!.fraction).toBe(0);
+    expect([...new Set(phases)]).toEqual(['extract', 'translate', 'write', 'zip', 'done']);
+    expect(phases.filter((p) => p === 'write').length).toBeGreaterThan(3);
+    for (let i = 1; i < events.length; i++) expect(events[i]!.fraction).toBeGreaterThanOrEqual(events[i - 1]!.fraction);
+    expect(events.at(-1)).toMatchObject({ phase: 'done', fraction: 1 });
+    expect(events.filter((e) => e.phase === 'done')).toHaveLength(1);
+  });
+
+  it('reports phase boundaries for a custom writer that reports nothing', async () => {
+    const events: ExportProgress[] = [];
+    const writer = { name: 'quiet', write: async () => new Uint8Array([1]) };
+    await exportHighchartsToXlsx(render(F.simpleLine), { writer, onProgress: (p) => events.push(p) });
+    expect([...new Set(events.map((e) => e.phase))]).toEqual(['extract', 'translate', 'write', 'done']);
+  });
+
+  it('timings include zipMs, part of writeMs', async () => {
+    const { timings } = await exportHighchartsOptionsToXlsx(bigOptions(2_000, 1));
+    expect(timings.zipMs).toBeGreaterThan(0);
+    expect(timings.zipMs).toBeLessThanOrEqual(timings.writeMs);
+    expect(timings.imageMs).toBe(0);
+    const quiet = await exportHighchartsToXlsx(render(F.simpleLine), {
+      writer: { name: 'quiet', write: async () => new Uint8Array([1]) },
+    });
+    expect(quiet.timings.zipMs).toBe(0);
+  });
+
+  it('errors thrown by onProgress propagate unwrapped', async () => {
+    const boom = new Error('progress callback failed');
+    const thrown = await exportHighchartsOptionsToXlsx(bigOptions(), {
+      onProgress: (p) => {
+        if (p.phase === 'write' && p.fraction > 0.3) throw boom;
+      },
+    }).catch((e: unknown) => e);
+    expect(thrown).toBe(boom);
+  });
+
+  it('validates signal and onProgress', async () => {
+    for (const [property, value] of [
+      ['signal', { aborted: 'no' }],
+      ['signal', 'abort'],
+      ['onProgress', 42],
+    ] as const) {
+      const error = await expectExportError(
+        exportHighchartsOptionsToXlsx(F.simpleLine, { [property]: value } as unknown as ExportOptions),
+        'INVALID_OPTIONS',
+      );
+      expect(error.details.property).toBe(property);
+    }
+  });
+
+  it('exportChartsToWorkbook honours signal and onProgress', async () => {
+    const entries = [{ chart: render(F.simpleLine) }, { chart: render(F.columnChart) }];
+    const events: ExportProgress[] = [];
+    const result = await exportChartsToWorkbook(entries, { onProgress: (p) => events.push(p) });
+    expect(result.bytes.byteLength).toBeGreaterThan(0);
+    expect(events.at(-1)).toMatchObject({ phase: 'done', fraction: 1 });
+    expect(events.filter((e) => e.phase === 'extract')).toHaveLength(2);
+    for (let i = 1; i < events.length; i++) expect(events[i]!.fraction).toBeGreaterThanOrEqual(events[i - 1]!.fraction);
+
+    const controller = new AbortController();
+    const error = await expectExportError(
+      exportChartsToWorkbook(entries, {
+        signal: controller.signal,
+        onProgress: (p) => {
+          if (p.phase === 'translate') controller.abort('stop');
+        },
+      }),
+      'ABORTED',
+    );
+    expect(error.cause).toBe('stop');
+  });
+
+  it('downloadHighchartsAsXlsx does not download after an abort', async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click');
+    const controller = new AbortController();
+    const error = await expectExportError(
+      downloadHighchartsAsXlsx(render(F.simpleLine), {
+        signal: controller.signal,
+        onProgress: (p) => {
+          if (p.phase === 'done') controller.abort('too late');
+        },
+      }),
+      'ABORTED',
+    );
+    expect(error.cause).toBe('too late');
+    expect(click).not.toHaveBeenCalled();
   });
 });

@@ -24,20 +24,10 @@ import { toFont, type CssStyleLike } from '../translators/typography-translator'
 import { parseColor } from '../utils/colors';
 import { readEffectiveStyle } from './css-resolver';
 import { axisCategories, axisKind } from './extract-axes';
-import { borderStroke, fillAt, fontFor, seriesShowsInLegend } from './extract-styles';
+import { borderStroke, fillAt, fontFor, langSeparators, seriesShowsInLegend } from './extract-styles';
 import { arr, bool, deepMerge, firstRec, get, num, rec, str, type Rec } from './guards';
+import { isBarLike, isPieLike, isRangePointKind, kindOf, styledColorCount } from './series-types';
 import type { ChartView, ExtractContext, HcPointLike, HcSeriesLike, SeriesView } from './types';
-
-const DIRECT_KINDS: Readonly<Record<string, SeriesKind>> = {
-  line: 'line',
-  spline: 'spline',
-  area: 'area',
-  areaspline: 'areaspline',
-  column: 'column',
-  bar: 'bar',
-  scatter: 'scatter',
-  bubble: 'bubble',
-};
 
 const MARKER_KINDS: ReadonlySet<SeriesKind> = new Set<SeriesKind>([
   'line',
@@ -47,10 +37,15 @@ const MARKER_KINDS: ReadonlySet<SeriesKind> = new Set<SeriesKind>([
   'scatter',
   'bubble',
 ]);
-const LINE_KINDS: ReadonlySet<SeriesKind> = new Set<SeriesKind>(['line', 'spline', 'area', 'areaspline', 'scatter']);
-const AREA_KINDS: ReadonlySet<SeriesKind> = new Set<SeriesKind>(['area', 'areaspline']);
-const BAR_KINDS: ReadonlySet<SeriesKind> = new Set<SeriesKind>(['column', 'bar']);
-const PIE_KINDS: ReadonlySet<SeriesKind> = new Set<SeriesKind>(['pie', 'doughnut']);
+const LINE_KINDS: ReadonlySet<SeriesKind> = new Set<SeriesKind>([
+  'line',
+  'spline',
+  'area',
+  'areaspline',
+  'scatter',
+  'arearange',
+]);
+const AREA_KINDS: ReadonlySet<SeriesKind> = new Set<SeriesKind>(['area', 'areaspline', 'arearange']);
 
 /** `pointArrayMap` of common non-core types, used when no live series tells us. */
 const POINT_ARRAY_MAPS: Readonly<Record<string, readonly string[]>> = {
@@ -86,9 +81,16 @@ function solidColor(input: unknown, view: ChartView): Color | null {
   return fillToSolidColor(toFill(input, view.resolver).fill);
 }
 
+/** Number of points of a series view (live points, else the source data). */
+function pointCountOf(s: SeriesView): number {
+  const live = s.rt?.points?.length;
+  if (typeof live === 'number' && live > 0) return live;
+  return rawData(s)?.length ?? 0;
+}
+
 function seriesKind(view: ChartView, s: SeriesView): SeriesKind {
   if (s.type === 'pie') return pieInnerSize(view, s) > 0 ? 'doughnut' : 'pie';
-  return DIRECT_KINDS[s.type] ?? 'unknown';
+  return kindOf(s.type);
 }
 
 /** Inner size of a pie as a fraction of its outer diameter (0 for a plain pie). */
@@ -116,6 +118,20 @@ function clamp01(n: number): number {
 
 function styledModeColor(ctx: ExtractContext, s: SeriesView, kind: SeriesKind): Color | null {
   const { view } = ctx;
+  // Explicit CSS variable overrides win (headless and browser): the series class color variable.
+  const count = styledColorCount(view.opts);
+  const variable = (i: number): Color | null => {
+    const name = `--highcharts-color-${((i % count) + count) % count}`;
+    return typeof view.cssVariables?.[name] === 'string' ? parseColor(`var(${name})`, view.resolver) : null;
+  };
+  const own = variable(s.colorIndex);
+  if (own) {
+    // Point-colored series (pies) need a variable per slice color too.
+    const slices = isPieLike(kind) || s.opts.colorByPoint === true ? Math.min(count, pointCountOf(s)) : 0;
+    let allResolved = true;
+    for (let i = 0; i < slices && allResolved; i++) allResolved = variable(i) !== null;
+    if (allResolved) return own;
+  }
   if (view.browser && s.rt) {
     const lineLike = LINE_KINDS.has(kind);
     const firstGraphic = (s.rt.points ?? []).find((p) => p?.graphic?.element)?.graphic?.element;
@@ -182,8 +198,8 @@ function seriesMarker(
 }
 
 function dataLabelPosition(kind: SeriesKind, dl: Rec, stacking: Stacking): DataLabelPosition {
-  if (PIE_KINDS.has(kind)) return (num(dl.distance) ?? 30) < 0 ? 'insideEnd' : 'outsideEnd';
-  if (BAR_KINDS.has(kind)) {
+  if (isPieLike(kind)) return (num(dl.distance) ?? 30) < 0 ? 'insideEnd' : 'outsideEnd';
+  if (isBarLike(kind)) {
     // Highcharts: `inside` defaults to true for stacked columns; inside labels default to the middle.
     const inside = bool(dl.inside) ?? stacking !== null;
     if (!inside) return 'outsideEnd';
@@ -204,7 +220,7 @@ function seriesDataLabels(ctx: ExtractContext, s: SeriesView, kind: SeriesKind, 
   const { view, diagnostics } = ctx;
   const dl = firstRec(s.opts.dataLabels) ?? {};
   const userDl = firstRec(s.userOpts.dataLabels) ?? {};
-  const isPie = PIE_KINDS.has(kind);
+  const isPie = isPieLike(kind);
   const enabled = bool(dl.enabled) ?? (isPie && !s.rt);
   const base: DataLabelStyle = {
     enabled,
@@ -224,7 +240,11 @@ function seriesDataLabels(ctx: ExtractContext, s: SeriesView, kind: SeriesKind, 
   const format = str(dl.format);
   // Pie default label is the point name (built-in formatter).
   if (isPie && format === undefined && formatter === undefined) return base;
-  const t = translateFormatString(format, formatter, { kind: 'dataLabel', property: `${s.path}.dataLabels` });
+  const t = translateFormatString(format, formatter, {
+    kind: 'dataLabel',
+    property: `${s.path}.dataLabels`,
+    ...langSeparators(view),
+  });
   diagnostics.addAll(t.diagnostics);
   return {
     ...base,
@@ -245,6 +265,7 @@ function seriesYFormat(ctx: ExtractContext, s: SeriesView): NumberFormat | null 
   const t = translateFormatString(undefined, undefined, {
     kind: 'value',
     property: `${s.path}.tooltip`,
+    ...langSeparators(ctx.view),
     ...(valueDecimals !== undefined ? { valueDecimals } : {}),
     ...(valuePrefix !== undefined ? { valuePrefix } : {}),
     ...(valueSuffix !== undefined ? { valueSuffix } : {}),
@@ -291,6 +312,7 @@ function pointDataLabels(pc: PointContext, po: Rec, pointIndex: number): Partial
     const t = translateFormatString(dl.format, dl.formatter, {
       kind: 'dataLabel',
       property: `${pc.s.path}.data[${pointIndex}].dataLabels`,
+      ...langSeparators(pc.ctx.view),
     });
     collectPointIssues(pc, t.diagnostics, pointIndex);
     out.format = t.format;
@@ -371,7 +393,11 @@ function pointFromRuntime(pc: PointContext, p: HcPointLike, i: number): PointMod
   const po = rec(p.options) ?? {};
   const rawX = num(p.x) ?? null;
   const x = runtimeX(pc, rawX);
-  const y = num(p.y) ?? null;
+  const ranged = isRangePointKind(pc.kind);
+  // Range points (errorbar, columnrange, arearange) carry low/high; their y is not a data value.
+  const y = ranged ? null : (num(p.y) ?? null);
+  const low = ranged ? (num(p.low) ?? null) : null;
+  const high = ranged ? (num(p.high) ?? null) : null;
   let color: Color | null = solidColor(po.color, view);
   if (color === null && pc.byPoint) {
     color = view.styledMode ? null : solidColor(p.color, view);
@@ -385,13 +411,14 @@ function pointFromRuntime(pc: PointContext, p: HcPointLike, i: number): PointMod
     name: str(p.name) ?? categoryName(pc, rawX),
     y,
     z: num(p.z) ?? null,
-    isNull: p.isNull === true || y === null,
+    isNull: p.isNull === true || (ranged ? low === null || high === null : y === null),
     color,
     border: pointBorder(view, po),
     marker: pointMarker(view, po),
     sliced: slicedOffset(pc, p.sliced),
     dataLabels: pointDataLabels(pc, po, num(p.index) ?? i),
     visible: p.visible !== false,
+    ...(ranged ? { low, high } : {}),
   };
 }
 
@@ -499,7 +526,8 @@ function pointsFromRaw(pc: PointContext, data: readonly unknown[]): PointModel[]
   const o = pc.s.opts;
   const map = pc.s.rt?.pointArrayMap ?? POINT_ARRAY_MAPS[pc.s.type] ?? ['y'];
   const hasY = map.includes('y');
-  if (!hasY) {
+  const ranged = isRangePointKind(pc.kind);
+  if (!hasY && !ranged) {
     pc.ctx.diagnostics.report(
       'NON_NUMERIC_VALUE',
       'approximated',
@@ -598,11 +626,22 @@ function pointsFromRaw(pc: PointContext, data: readonly unknown[]): PointModel[]
       nonNumeric(pc, i, item);
       continue;
     }
-    const yRaw = hasY ? values.y : null;
+    const yRaw = hasY && !ranged ? values.y : null;
     if (yRaw !== undefined && yRaw !== null && num(yRaw) === undefined) {
       nonNumeric(pc, i, item);
       continue;
     }
+    const lowRaw = ranged ? values.low : null;
+    const highRaw = ranged ? values.high : null;
+    if (
+      (lowRaw !== undefined && lowRaw !== null && num(lowRaw) === undefined) ||
+      (highRaw !== undefined && highRaw !== null && num(highRaw) === undefined)
+    ) {
+      nonNumeric(pc, i, item);
+      continue;
+    }
+    const low = num(lowRaw) ?? null;
+    const high = num(highRaw) ?? null;
     const zRaw = values.z;
     const xValue = hasExplicitX && x !== undefined ? x : xAt(autoIndex++);
     const y = num(yRaw) ?? null;
@@ -616,16 +655,17 @@ function pointsFromRaw(pc: PointContext, data: readonly unknown[]): PointModel[]
     }
     out.push({
       x: xValue,
-      name: name ?? (PIE_KINDS.has(pc.kind) ? 'Slice' : categoryName(pc, xValue)),
+      name: name ?? (isPieLike(pc.kind) ? 'Slice' : categoryName(pc, xValue)),
       y,
       z: num(zRaw) ?? null,
-      isNull: y === null,
+      isNull: ranged ? low === null || high === null : y === null,
       color,
       border: pointBorder(view, po),
       marker: pointMarker(view, po),
       sliced: slicedOffset(pc, po.sliced),
       dataLabels: pointDataLabels(pc, po, i),
       visible: po.visible !== false,
+      ...(ranged ? { low, high } : {}),
     });
   }
   return out;
@@ -826,7 +866,7 @@ function extractOne(ctx: ExtractContext, s: SeriesView): SeriesModel {
   const { view, diagnostics } = ctx;
   const o = s.opts;
   const kind = seriesKind(view, s);
-  const isPie = PIE_KINDS.has(kind);
+  const isPie = isPieLike(kind);
 
   const color = view.styledMode
     ? styledModeColor(ctx, s, kind)
@@ -848,13 +888,22 @@ function extractOne(ctx: ExtractContext, s: SeriesView): SeriesModel {
     issues: new Map(),
   };
   const { points, semantics } = extractPoints(pc);
+  const linked = linkedParentId(ctx, s);
 
   let line: Stroke | null = null;
   if (LINE_KINDS.has(kind) || (kind === 'unknown' && num(o.lineWidth) !== undefined)) {
-    const width = num(o.lineWidth) ?? (kind === 'scatter' ? 0 : 2);
+    const width = num(o.lineWidth) ?? (kind === 'scatter' ? 0 : kind === 'arearange' ? 1 : 2);
     const lineColor = AREA_KINDS.has(kind) ? o.lineColor : undefined;
     line = strokeFromOptions(
       { color: lineColor, width, dashStyle: o.dashStyle },
+      { color, width, dash: 'solid' },
+      view.resolver,
+    );
+  } else if (kind === 'errorbar') {
+    // The stem (and whiskers) of an error bar: stemWidth/stemColor, else the series line.
+    const width = num(o.stemWidth) ?? num(o.lineWidth) ?? 1;
+    line = strokeFromOptions(
+      { color: o.stemColor ?? undefined, width, dashStyle: o.stemDashStyle ?? o.dashStyle },
       { color, width, dash: 'solid' },
       view.resolver,
     );
@@ -878,7 +927,7 @@ function extractOne(ctx: ExtractContext, s: SeriesView): SeriesModel {
       fill = seriesFill();
       fillOpacity = num(o.fillOpacity) ?? 0.75;
     }
-  } else if (BAR_KINDS.has(kind) || isPie || kind === 'unknown') {
+  } else if (isBarLike(kind) || isPie || kind === 'unknown') {
     fill = seriesFill();
   } else if (kind === 'bubble') {
     fill = seriesFill();
@@ -886,12 +935,10 @@ function extractOne(ctx: ExtractContext, s: SeriesView): SeriesModel {
   }
 
   const border =
-    BAR_KINDS.has(kind) || isPie
-      ? borderStroke(view, o.borderColor, o.borderWidth, { color: '#ffffff', width: 1 })
-      : null;
+    isBarLike(kind) || isPie ? borderStroke(view, o.borderColor, o.borderWidth, { color: '#ffffff', width: 1 }) : null;
 
   let bars: SeriesModel['bars'] = null;
-  if (BAR_KINDS.has(kind)) {
+  if (isBarLike(kind)) {
     // Highcharts rounds bar corners by 3px by default; only an explicit setting is worth a diagnostic,
     // so read the user's own options (series, then plotOptions) rather than the merged defaults.
     const uo = s.userOpts;
@@ -960,7 +1007,30 @@ function extractOne(ctx: ExtractContext, s: SeriesView): SeriesModel {
     yFormat: seriesYFormat(ctx, s),
     points,
     dataSemantics: semantics,
+    ...(linked !== null ? { linkedTo: linked } : {}),
   };
+}
+
+/**
+ * Model id of the series `s` is linked to: the live `linkedParent`, else `linkedTo` (a series id or
+ * `':previous'`, the default of errorbar series). Null when not linked or the parent is unknown.
+ */
+function linkedParentId(ctx: ExtractContext, s: SeriesView): string | null {
+  const views = ctx.view.series;
+  const idOf = (v: SeriesView): string => str(v.opts.id) ?? `series-${v.index}`;
+  const lp = s.rt?.linkedParent;
+  if (lp) {
+    const v = views.find((x) => x.rt === lp);
+    if (v) return idOf(v);
+  }
+  const linkedTo = s.opts.linkedTo === undefined && s.type === 'errorbar' ? ':previous' : s.opts.linkedTo;
+  if (typeof linkedTo !== 'string' || linkedTo === '') return null;
+  if (linkedTo === ':previous') {
+    const at = views.indexOf(s);
+    return at > 0 ? idOf(views[at - 1]!) : null;
+  }
+  const v = views.find((x) => x !== s && str(x.opts.id) === linkedTo);
+  return v ? idOf(v) : null;
 }
 
 /** Extracts the series of the view, honoring `seriesVisibility`. */

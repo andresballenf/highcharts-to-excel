@@ -9,12 +9,15 @@ import { fileURLToPath } from 'node:url';
 import { test as base, expect, type Locator, type Page } from '@playwright/test';
 import { inspectXlsx, type XlsxInspection } from '../tests/helpers/inspect-xlsx';
 import {
+  EXCEL_MENU_ICON,
   allMenuItems,
+  buttonSymbol,
   chartContainer,
   chartRoot,
   contextButton,
   contextMenu,
   menuItems as chartMenuItems,
+  menuList,
 } from './helpers';
 
 const OUTPUT_DIR = fileURLToPath(new URL('./output/', import.meta.url));
@@ -22,6 +25,10 @@ const SCREENSHOT_DIR = path.join(OUTPUT_DIR, 'screenshots');
 fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
 const EXCEL_MENU_TEXT = 'Download editable Excel chart';
+/** demo/src/charts.ts GERMAN_MENU_TEXT, set by the branded card's "Deutsch" button. */
+const GERMAN_MENU_TEXT = 'Als Excel-Diagramm herunterladen';
+/** demo/src/charts.ts BRAND_COLOR (#1d6f42) as computed CSS. */
+const BRAND_RGB = 'rgb(29, 111, 66)';
 
 /** Every test collects console errors and page errors; any of them fails the test at teardown. */
 const test = base.extend<{ pageErrors: string[] }>({
@@ -99,6 +106,7 @@ test('the page loads every card without errors', async ({ page }) => {
     [
       'area',
       'bar',
+      'branded',
       'column',
       'combo',
       'custom',
@@ -306,6 +314,80 @@ test('export all: one workbook with a chart and a data sheet per chart', async (
   await expect(page.getByTestId('export-all-status')).toContainText(`${n} charts`);
 });
 
+/** The `d` of the context-button symbol of a throwaway chart that keeps Highcharts' default 'menu'. */
+async function defaultButtonPath(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const H = window.__demo.highcharts;
+    const div = document.body.appendChild(document.createElement('div'));
+    div.style.width = '400px';
+    const chart = H.chart(div, {
+      series: [{ type: 'line', data: [1, 2] }],
+      exporting: { buttons: { contextButton: { symbol: 'menu' } } },
+    });
+    const d = chart.container.querySelector('.highcharts-contextbutton .highcharts-button-symbol')?.getAttribute('d');
+    chart.destroy();
+    div.remove();
+    return d ?? '';
+  });
+}
+
+test('branded export button and menu: custom symbol, Excel icon, menu styles, translated text', async ({ page }) => {
+  await openDemo(page);
+  const chart = chartContainer(page, 'branded');
+  await chart.scrollIntoViewIfNeeded();
+
+  // The context button draws the registered download-arrow symbol in the brand color.
+  const symbol = buttonSymbol(chart);
+  await expect(symbol).toHaveAttribute('stroke', '#1d6f42');
+  await expect(symbol).toHaveAttribute('fill', '#1d6f42');
+  const brandedD = await symbol.getAttribute('d');
+  const defaultD = await defaultButtonPath(page);
+  expect(defaultD).not.toBe('');
+  expect(brandedD).toBeTruthy();
+  expect(brandedD).not.toBe(defaultD);
+
+  // The open menu: one Excel item with the built-in SVG icon, styled by menuStyle / menuItemStyle.
+  const items = await openMenu(page, 'branded');
+  expect(items.filter((t) => t === EXCEL_MENU_TEXT)).toHaveLength(1);
+  const excelItem = menuItems(page, 'branded').filter({ hasText: EXCEL_MENU_TEXT });
+  await expect(excelItem.locator(EXCEL_MENU_ICON)).toHaveCount(1);
+  await expect(excelItem.locator(EXCEL_MENU_ICON)).toBeVisible();
+  expect(await excelItem.locator(`${EXCEL_MENU_ICON} path`).count()).toBeGreaterThan(0);
+  expect(await excelItem.locator('.highcharts-editable-excel-label').textContent()).toBe(EXCEL_MENU_TEXT);
+  const itemCss = await excelItem.evaluate((li) => {
+    const cs = getComputedStyle(li);
+    return { fontSize: cs.fontSize, paddingLeft: cs.paddingLeft };
+  });
+  expect(itemCss).toEqual({ fontSize: '13px', paddingLeft: '14px' });
+  const listCss = await menuList(chart).evaluate((ul) => {
+    const cs = getComputedStyle(ul);
+    return { borderColor: cs.borderTopColor, borderWidth: cs.borderTopWidth, radius: cs.borderTopLeftRadius };
+  });
+  expect(listCss).toEqual({ borderColor: BRAND_RGB, borderWidth: '1px', radius: '6px' });
+  await excelItem.hover();
+  await expect.poll(() => excelItem.evaluate((li) => getComputedStyle(li).color)).toBe(BRAND_RGB);
+  await page
+    .locator('article[data-chart="branded"]')
+    .screenshot({ path: path.join(SCREENSHOT_DIR, 'branded-menu-open.png') });
+
+  // Exports still download a valid, native workbook.
+  const english = await captureDownload(page, () => excelItem.click(), 'branded.xlsx');
+  expect(english.x.chartXml(0)).toContain('<c:barChart>');
+  expect(english.x.hasImages()).toBe(false);
+
+  // langKey: the "Deutsch" button sets lang.downloadEditableXLSX and re-creates the chart.
+  await page.getByTestId('lang-de').click();
+  const german = await openMenu(page, 'branded');
+  expect(german).toContain(GERMAN_MENU_TEXT);
+  expect(german).not.toContain(EXCEL_MENU_TEXT);
+  const germanItem = menuItems(page, 'branded').filter({ hasText: GERMAN_MENU_TEXT });
+  await expect(germanItem.locator(EXCEL_MENU_ICON)).toHaveCount(1);
+  const translated = await captureDownload(page, () => germanItem.click(), 'branded-de.xlsx');
+  expect(translated.x.chartXml(0)).toContain('<c:barChart>');
+  // Charts not re-created keep the text they were created with.
+  expect(await openMenu(page, 'line')).toContain(EXCEL_MENU_TEXT);
+});
+
 test.describe('mobile viewport', () => {
   test.use({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true });
 
@@ -322,5 +404,24 @@ test.describe('mobile viewport', () => {
 
     const { x } = await captureDownload(page, () => page.getByTestId('export-line').click(), 'line-mobile.xlsx');
     expect(x.chartXml(0)).toContain('<c:lineChart>');
+  });
+
+  test('the branded menu opens and fits at 375px', async ({ page }) => {
+    await openDemo(page);
+    const chart = chartContainer(page, 'branded');
+    await chart.scrollIntoViewIfNeeded();
+    await contextButton(chart).click();
+    await expect(contextMenu(chart)).toBeVisible();
+    const excelItem = menuItems(page, 'branded').filter({ hasText: EXCEL_MENU_TEXT });
+    await expect(excelItem.locator(EXCEL_MENU_ICON)).toBeVisible();
+    const box = await menuList(chart).boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(375);
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(scrollWidth).toBeLessThanOrEqual(375);
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'branded-mobile.png') });
+    const { x } = await captureDownload(page, () => excelItem.click(), 'branded-mobile.xlsx');
+    expect(x.chartXml(0)).toContain('<c:barChart>');
   });
 });

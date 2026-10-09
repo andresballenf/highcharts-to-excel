@@ -8,6 +8,7 @@
 import {
   createEmptyChartModel,
   type AxisModel,
+  type Color,
   type ChartMeta,
   type ChartModel,
   type SeriesModel,
@@ -18,6 +19,8 @@ import { createCssVariableResolver } from './css-resolver';
 import { extractAxes, isInternalAxis } from './extract-axes';
 import { computeBaseFont, extractChartStyles, extractPalette } from './extract-styles';
 import { extractSeries } from './extract-series';
+import { DEFAULT_TYPE_COLORS, isCartesian, isColoredByPoint, styledColorCount } from './series-types';
+import { parseColor } from '../utils/colors';
 import { DatetimeShifter, timeZoneFromChart, timeZoneFromOptions } from './extract-time';
 import {
   arr,
@@ -41,35 +44,17 @@ export interface ExtractOptions {
   chartHeight?: number;
   /** Highcharts version; when omitted it is read from a global `Highcharts` if present. */
   highchartsVersion?: string | null;
+  /**
+   * CSS custom property values (`ThemeOverrides.cssVariables`, e.g. `{ '--highcharts-color-0': '#8e44ad' }`)
+   * consulted before the browser's computed styles, so styled-mode charts resolve headless too.
+   */
+  cssVariables?: Readonly<Record<string, string>>;
 }
-
-/** Series types without cartesian axes. */
-const NON_CARTESIAN_TYPES: ReadonlySet<string> = new Set([
-  'pie',
-  'variablepie',
-  'funnel',
-  'pyramid',
-  'item',
-  'sunburst',
-  'treemap',
-  'treegraph',
-  'networkgraph',
-  'packedbubble',
-  'organization',
-  'sankey',
-  'dependencywheel',
-  'venn',
-  'wordcloud',
-  'timeline',
-  'solidgauge',
-]);
 
 /** Highcharts' default marker symbol cycle (`chart.options.symbols`). */
 const DEFAULT_SYMBOLS = ['circle', 'diamond', 'square', 'triangle', 'triangle-down'];
 /** Series types that consume a symbol from the cycle (`getSymbol` is a no-op for the others). */
 const SYMBOL_TYPES: ReadonlySet<string> = new Set(['line', 'spline', 'area', 'areaspline', 'scatter']);
-/** Series types colored by point (they do not consume a series color). */
-const BY_POINT_TYPES: ReadonlySet<string> = new Set(['pie', 'variablepie', 'funnel', 'pyramid']);
 
 function isInternalSeries(s: HcSeriesLike | Rec | undefined): boolean {
   if (!s) return true;
@@ -81,17 +66,43 @@ function isInternalSeries(s: HcSeriesLike | Rec | undefined): boolean {
   return rt.baseSeries !== undefined && rt.baseSeries !== null;
 }
 
+/**
+ * Styled-mode palette: `--highcharts-color-<i>` (i < chart.colorCount) where `cssVariables` sets it,
+ * else the regular palette entry. Without overrides it is the regular palette.
+ */
+function styledPalette(
+  opts: Rec,
+  resolver: ReturnType<typeof createCssVariableResolver>,
+  cssVariables: ExtractOptions['cssVariables'],
+): Color[] {
+  const base = extractPalette(opts, resolver);
+  const overridden = Object.keys(cssVariables ?? {}).some((k) => k.startsWith('--highcharts-color-'));
+  if (!overridden || base.length === 0) return base;
+  const count = styledColorCount(opts);
+  return Array.from({ length: count }, (_, i) => {
+    const name = `--highcharts-color-${i}`;
+    return (cssVariables?.[name] !== undefined ? parseColor(`var(${name})`, resolver) : null) ?? base[i % base.length]!;
+  });
+}
+
 function axisPath(which: 'x' | 'y', i: number): string {
   return `${which}Axis[${i}]`;
 }
 
-function buildPlaceholderView(opts: Rec, userOpts: Rec, rt: HcChartLike | undefined): ChartView {
-  const resolver = createCssVariableResolver(rt);
+function buildPlaceholderView(
+  opts: Rec,
+  userOpts: Rec,
+  rt: HcChartLike | undefined,
+  cssVariables: ExtractOptions['cssVariables'],
+): ChartView {
+  const resolver = createCssVariableResolver(rt, cssVariables);
+  const styledMode = rt?.styledMode === true || get(opts, 'chart', 'styledMode') === true;
   return {
     ...(rt ? { rt } : {}),
     opts,
     userOpts,
-    styledMode: rt?.styledMode === true || get(opts, 'chart', 'styledMode') === true,
+    styledMode,
+    ...(cssVariables ? { cssVariables } : {}),
     browser: rt !== undefined && isRealBrowser(),
     width: 600,
     height: 400,
@@ -99,7 +110,7 @@ function buildPlaceholderView(opts: Rec, userOpts: Rec, rt: HcChartLike | undefi
     inverted: false,
     polar: false,
     resolver,
-    palette: extractPalette(opts, resolver),
+    palette: styledMode ? styledPalette(opts, resolver, cssVariables) : extractPalette(opts, resolver),
     baseFont: computeBaseFont(rt, opts, resolver),
     xAxes: [],
     yAxes: [],
@@ -115,7 +126,7 @@ function buildPlaceholderView(opts: Rec, userOpts: Rec, rt: HcChartLike | undefi
 function viewFromChart(chart: HcChartLike, extract: ExtractOptions): ChartView {
   const opts = rec(chart.options) ?? {};
   const userOpts = rec(chart.userOptions) ?? {};
-  const view = buildPlaceholderView(opts, userOpts, chart);
+  const view = buildPlaceholderView(opts, userOpts, chart, extract.cssVariables);
 
   view.width = num(extract.chartWidth) ?? num(chart.chartWidth) ?? 600;
   view.height = num(extract.chartHeight) ?? num(chart.chartHeight) ?? 400;
@@ -136,7 +147,7 @@ function viewFromChart(chart: HcChartLike, extract: ExtractOptions): ChartView {
   view.cartesian =
     typeof chart.hasCartesianSeries === 'boolean'
       ? chart.hasCartesianSeries
-      : series.some((s) => !NON_CARTESIAN_TYPES.has(str(s.type) ?? 'line'));
+      : series.some((s) => isCartesian(str(s.type) ?? 'line'));
 
   const axisViews = (which: 'x' | 'y', list: HcAxisLike[]): AxisView[] =>
     view.cartesian
@@ -176,7 +187,7 @@ function viewFromChart(chart: HcChartLike, extract: ExtractOptions): ChartView {
       // Pie-like series keep a placeholder runtime color (#cccccc for empty pies); only an explicit one counts.
       explicitColor: view.styledMode
         ? undefined
-        : BY_POINT_TYPES.has(type)
+        : isColoredByPoint(type)
           ? get(s.userOptions, 'color')
           : (s.color ?? sOpts.color),
       symbol: s.symbol,
@@ -208,7 +219,7 @@ function resolveAxisRef(ref: unknown, axes: AxisView[]): number {
 }
 
 function viewFromOptions(options: Rec, extract: ExtractOptions): ChartView {
-  const view = buildPlaceholderView(options, options, undefined);
+  const view = buildPlaceholderView(options, options, undefined, extract.cssVariables);
   const c = rec(options.chart) ?? {};
   const width = num(extract.chartWidth) ?? num(c.width) ?? 600;
   view.width = width;
@@ -227,7 +238,7 @@ function viewFromOptions(options: Rec, extract: ExtractOptions): ChartView {
   const rawSeries = (arr(options.series) ?? []).map((s) => rec(s) ?? {}).filter((s) => !isInternalSeries(s));
   const types = rawSeries.map((s) => str(s.type) ?? chartType);
   view.inverted = c.inverted === true || types.includes('bar');
-  view.cartesian = rawSeries.length === 0 || types.some((t) => !NON_CARTESIAN_TYPES.has(t));
+  view.cartesian = rawSeries.length === 0 || types.some((t) => isCartesian(t));
 
   const axisViews = (which: 'x' | 'y', list: Rec[]): AxisView[] =>
     view.cartesian
@@ -249,7 +260,9 @@ function viewFromOptions(options: Rec, extract: ExtractOptions): ChartView {
     if (colorIndex === undefined) {
       colorIndex = colorCounter;
       // Highcharts' getCyclic: an explicit color does not consume a palette slot.
-      if (merged.color === undefined && !BY_POINT_TYPES.has(type)) colorCounter++;
+      if (merged.color === undefined && DEFAULT_TYPE_COLORS[type] === undefined && !isColoredByPoint(type)) {
+        colorCounter++;
+      }
     }
     let symbol: unknown = get(merged, 'marker', 'symbol');
     if (symbol === undefined && SYMBOL_TYPES.has(type)) {
@@ -267,7 +280,8 @@ function viewFromOptions(options: Rec, extract: ExtractOptions): ChartView {
       xAxis: resolveAxisRef(merged.xAxis, view.xAxes),
       yAxis: resolveAxisRef(merged.yAxis, view.yAxes),
       colorIndex,
-      explicitColor: view.styledMode ? undefined : merged.color,
+      // Type colors from Highcharts' plotOptions (errorbar: black) apply to plain options too.
+      explicitColor: view.styledMode ? undefined : (merged.color ?? DEFAULT_TYPE_COLORS[type]),
       symbol,
     };
   });

@@ -13,6 +13,10 @@ declare module 'highcharts' {
   interface ExportingOptions {
     editableExcel?: PerChartExportConfig;
   }
+  // The menu item text lives under lang[langKey] (default langKey: 'downloadEditableXLSX').
+  interface LangOptions {
+    downloadEditableXLSX?: string;
+  }
 }
 
 export interface DemoChart {
@@ -323,4 +327,27 @@ export const demoCharts: DemoChart[] = [
       ],
     },
   },
+  {
+    name: 'branded',
+    title: 'Branded export button',
+    note:
+      'The page-wide install brands every menu: a download-arrow button (button.svgPath), an Excel icon ' +
+      '(menuIcon) and green menu styles. "Deutsch" sets lang.downloadEditableXLSX and re-creates this chart.',
+    options: {
+      chart: { type: 'column' },
+      title: { text: 'Regional revenue' },
+      xAxis: { categories: ['North', 'South', 'East', 'West'] },
+      yAxis: { title: { text: 'EUR (thousands)' } },
+      series: [{ type: 'column', name: 'Revenue', data: [42, 35, 51, 28], color: '#1d6f42' }],
+    },
+  },
 ];
+
+/** Excel green used by the demo's export-menu branding. */
+export const BRAND_COLOR = '#1d6f42';
+
+/** A download arrow over a baseline, in a 0..1 box (registered as the context-button symbol). */
+export const DOWNLOAD_ARROW_PATH = 'M0.5 0.05 V0.66 M0.2 0.38 L0.5 0.68 L0.8 0.38 M0.08 0.94 H0.92';
+
+/** The German text the "Deutsch" button registers under lang.downloadEditableXLSX. */
+export const GERMAN_MENU_TEXT = 'Als Excel-Diagramm herunterladen';

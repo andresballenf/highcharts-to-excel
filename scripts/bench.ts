@@ -48,14 +48,16 @@ const fmt = (n: number): string => n.toLocaleString('en-US');
 const lines = [
   `Highcharts ${report.highchartsVersion ?? '?'} · Node ${report.node} · jsdom · median of ${report.rows[0]?.runs ?? 3} runs (rendering excluded) · gc exposed: ${String(report.gcExposed)}`,
   '',
-  '| Points | extract ms | translate ms | write ms | total ms | XLSX bytes | heap Δ MB | ROW_LIMIT warning |',
-  '|---|---:|---:|---:|---:|---:|---:|---|',
+  '| Points | extract ms | translate ms | write ms (zip) | total ms | max tick gap ms | ticks | worker zip: total ms | worker zip: max tick gap ms | XLSX bytes | heap Δ MB | ROW_LIMIT warning |',
+  '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|',
   ...report.rows.map(
     (r) =>
-      `| ${r.label} | ${r.extractMs} | ${r.translateMs} | ${r.writeMs} | ${r.totalMs} | ${fmt(r.bytes)} | ${r.heapDeltaMB} | ${r.rowLimitWarning ? 'yes' : 'no'} |`,
+      `| ${r.label} | ${r.extractMs} | ${r.translateMs} | ${r.writeMs} (${r.zipMs}) | ${r.totalMs} | ${r.maxTickGapMs} | ${r.ticks} | ${r.workerZipTotalMs} | ${r.workerZipMaxTickGapMs} | ${fmt(r.bytes)} | ${r.heapDeltaMB} | ${r.rowLimitWarning ? 'yes' : 'no'} |`,
   ),
   '',
-  `Excel guidance: at most ${fmt(report.excelMaxPointsPerSeries)} points per chart series; none of these sizes exceeds it, so no ROW_LIMIT_EXCEEDED warning is expected.`,
+  `Excel guidance: at most ${fmt(report.excelMaxPointsPerSeries)} points per chart series; only the 100,000-points-per-series cases exceed it, so only they carry a ROW_LIMIT_EXCEEDED warning.`,
+  'max tick gap: longest gap between two ticks of a 10 ms interval running during the export (event-loop starvation).',
+  "Default columns: zipSync on the main thread (jsdom has no Worker). Worker zip: OoxmlExcelWriter({ zip: 'async' }) on fflate's worker_threads build, the browser-like path; same bytes.",
 ];
 console.log(`\n${lines.join('\n')}\n`);
 console.log('Wrote tests/output/bench.json');

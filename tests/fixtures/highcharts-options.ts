@@ -301,6 +301,24 @@ export const bubbleChart: Options = {
 
 /** [more] A type the core + more bundle renders but the exporter does not support. */
 export const unsupportedType: Options = {
+  chart: { type: 'boxplot' },
+  title: { text: 'Box plot' },
+  xAxis: { categories: ['Jan', 'Feb', 'Mar'] },
+  series: [
+    {
+      type: 'boxplot',
+      name: 'Observations',
+      data: [
+        [760, 801, 848, 895, 965],
+        [733, 853, 939, 980, 1080],
+        [714, 762, 817, 870, 918],
+      ],
+    },
+  ],
+};
+
+/** [more] Floating columns: exported as a stacked column with a hidden base (lows below zero). */
+export const columnRangeChart: Options = {
   chart: { type: 'columnrange' },
   title: { text: 'Column range' },
   xAxis: { categories: ['Jan', 'Feb', 'Mar'] },
@@ -315,6 +333,34 @@ export const unsupportedType: Options = {
       ],
     },
   ],
+};
+
+/** [more] Columns with error bars linked to them (`linkedTo: ':previous'` is the errorbar default). */
+export const errorBarChart: Options = {
+  title: { text: 'Rainfall with error' },
+  xAxis: { categories: ['Jan', 'Feb', 'Mar', 'Apr'] },
+  series: [
+    { type: 'column', name: 'Rainfall', id: 'rain', data: [49.9, 71.5, 106.4, 129.2] },
+    {
+      type: 'errorbar',
+      name: 'Rainfall error',
+      linkedTo: 'rain',
+      data: [
+        [48, 51],
+        [68, 73],
+        [92, 110],
+        [128, 136],
+      ],
+    },
+  ],
+};
+
+/** [more] Polar columns: Excel radar charts cannot draw them, so this stays blocking. */
+export const polarColumnChart: Options = {
+  chart: { polar: true, type: 'column' },
+  title: { text: 'Polar columns' },
+  xAxis: { categories: ['N', 'E', 'S', 'W'] },
+  series: [{ type: 'column', name: 'Wind', data: [3, 5, 2, 4] }],
 };
 
 /** [more] */
@@ -370,7 +416,10 @@ export const allFixtures: Readonly<Record<string, Options>> = {
   customStyling,
   bubbleChart,
   unsupportedType,
+  columnRangeChart,
+  errorBarChart,
   polarChart,
+  polarColumnChart,
   emptyChart,
   largeChart,
 };

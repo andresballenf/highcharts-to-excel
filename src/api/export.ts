@@ -18,13 +18,14 @@ import {
   XLSX_MIME_TYPE,
   resolveExportOptions,
   type ExportOptions,
+  type ExportPhase,
+  type ExportProgress,
   type ExportResult,
   type MultiChartExportEntry,
   type MultiChartExportResult,
 } from '../types/public-api';
-import type { SheetSpec, WorkbookSpec } from '../excel/writer-interface';
+import type { ExcelWriter, SheetSpec, WorkbookSpec, WriteProgress } from '../excel/writer-interface';
 import { createDefaultExcelWriter } from '../excel/ooxml-writer';
-import type { ExcelWriter } from '../excel/writer-interface';
 import { extractChartModel, extractChartModelFromOptions } from '../highcharts/extract-chart';
 import { getHighchartsVersion } from '../highcharts/guards';
 import { applyThemeOverrides } from '../core/theme-overrides';
@@ -89,6 +90,103 @@ function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+// ---------------------------------------------------------------------------
+// Cancellation and progress
+// ---------------------------------------------------------------------------
+
+/** ExportError ABORTED for an aborted signal; `cause` is `signal.reason`. */
+export function abortedError(signal: AbortSignal): ExportError {
+  return new ExportError('ABORTED', 'The export was aborted (ExportOptions.signal).', {}, { cause: signal.reason });
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as { aborted?: unknown; addEventListener?: unknown };
+  return typeof v.aborted === 'boolean' && typeof v.addEventListener === 'function';
+}
+
+/**
+ * Validates `signal` and `onProgress` (the other options are checked by `resolveExportOptions`).
+ *
+ * @throws ExportError INVALID_OPTIONS naming the option.
+ */
+function validateRuntimeOptions(o: { signal?: unknown; onProgress?: unknown }): void {
+  const shown = (v: unknown) => (typeof v === 'string' ? JSON.stringify(v) : typeof v);
+  if (o.signal !== undefined && !isAbortSignal(o.signal)) {
+    throw new ExportError(
+      'INVALID_OPTIONS',
+      `Invalid export option "signal": expected an AbortSignal, got ${shown(o.signal)}.`,
+      { property: 'signal' },
+    );
+  }
+  if (o.onProgress !== undefined && typeof o.onProgress !== 'function') {
+    throw new ExportError(
+      'INVALID_OPTIONS',
+      `Invalid export option "onProgress": expected a function, got ${shown(o.onProgress)}.`,
+      { property: 'onProgress' },
+    );
+  }
+}
+
+/**
+ * Overall fraction at which each phase starts. Extraction and translation are cheap next to
+ * serializing and zipping (see the README benchmark), so they share the first 20 %.
+ */
+const WRITE_START = 0.2;
+const ZIP_START = 0.6;
+
+/**
+ * Turns phase events into monotonic `ExportProgress` calls and owns the abort checks.
+ * Remembers an error thrown by the user's callback so it can propagate unwrapped.
+ */
+class ExportRun {
+  private last = 0;
+  private zipStartedAt: number | null = null;
+  private thrown: { error: unknown } | null = null;
+
+  constructor(
+    readonly signal: AbortSignal | undefined,
+    private readonly callback: ((progress: ExportProgress) => void) | undefined,
+  ) {}
+
+  /** @throws ExportError ABORTED once the signal is aborted. */
+  checkpoint(): void {
+    if (this.signal?.aborted) throw abortedError(this.signal);
+  }
+
+  emit(phase: ExportPhase, fraction: number, detail?: string): void {
+    if (!this.callback) return;
+    const f = Math.min(1, Math.max(this.last, Number.isFinite(fraction) ? fraction : this.last));
+    this.last = f;
+    try {
+      this.callback(detail === undefined ? { phase, fraction: f } : { phase, fraction: f, detail });
+    } catch (error) {
+      this.thrown = { error };
+      throw error;
+    }
+  }
+
+  /** Writer progress (phase-local fractions) mapped onto the overall scale. */
+  readonly onWriterProgress = (p: WriteProgress): void => {
+    const f = Math.min(1, Math.max(0, typeof p?.fraction === 'number' ? p.fraction : 0));
+    if (p?.phase === 'zip') {
+      this.zipStartedAt ??= now();
+      this.emit('zip', ZIP_START + (1 - ZIP_START) * f, p.detail);
+    } else if (p?.phase === 'write') {
+      this.emit('write', WRITE_START + (ZIP_START - WRITE_START) * f, p.detail);
+    }
+  };
+
+  /** Time since the writer reported the start of its zip phase (0 when it never did). */
+  zipMs(): number {
+    return this.zipStartedAt === null ? 0 : elapsed(this.zipStartedAt);
+  }
+
+  isCallbackError(error: unknown): boolean {
+    return this.thrown !== null && this.thrown.error === error;
+  }
+}
+
 function describe(list: readonly Diagnostic[]): string {
   return list.map((d) => `${d.code} at ${d.property}: ${d.message}`).join('; ');
 }
@@ -101,6 +199,7 @@ function prepareModel(source: Source, resolved: ResolvedOptions, collector: Diag
     diagnostics: collector,
     ...(resolved.chartWidth !== undefined ? { chartWidth: resolved.chartWidth } : {}),
     ...(resolved.chartHeight !== undefined ? { chartHeight: resolved.chartHeight } : {}),
+    ...(resolved.themeOverrides?.cssVariables ? { cssVariables: resolved.themeOverrides.cssVariables } : {}),
   };
   let model =
     source.kind === 'chart'
@@ -182,10 +281,23 @@ function enforceEditable(t: Translated, strictMode: boolean, label: string): voi
   }
 }
 
-async function writeWorkbook(spec: WorkbookSpec, writer?: ExcelWriter): Promise<Uint8Array> {
+/**
+ * Runs the writer with the run's signal and progress. Checks the signal before and after, so a
+ * custom writer that ignores the context is still cancelled at the phase boundary.
+ */
+async function writeWorkbook(spec: WorkbookSpec, writer: ExcelWriter | undefined, run: ExportRun): Promise<Uint8Array> {
+  run.checkpoint();
+  run.emit('write', WRITE_START);
   try {
-    return await (writer ?? createDefaultExcelWriter()).write(spec);
+    const bytes = await (writer ?? createDefaultExcelWriter()).write(spec, {
+      ...(run.signal ? { signal: run.signal } : {}),
+      onProgress: run.onWriterProgress,
+    });
+    run.checkpoint();
+    return bytes;
   } catch (error) {
+    if (run.isCallbackError(error)) throw error;
+    if (run.signal?.aborted) throw abortedError(run.signal);
     if (error instanceof ExportError) throw error;
     throw new ExportError(
       'WRITER_FAILURE',
@@ -235,6 +347,7 @@ async function translateWithImage(
   t = now();
   const image = await referenceImageFor(source, prepared.model, resolved, prepared.collector);
   const imageMs = elapsed(t);
+  if (resolved.signal?.aborted) throw abortedError(resolved.signal);
   t = now();
   translated = translatePrepared(prepared, resolved, taken, image);
   translateMs += elapsed(t);
@@ -245,13 +358,19 @@ async function translateWithImage(
 async function runSingle(source: Source, options: ExportOptions | undefined): Promise<ExportResult> {
   const t0 = now();
   const resolved = resolveExportOptions(options);
+  validateRuntimeOptions(resolved);
+  const run = new ExportRun(resolved.signal, resolved.onProgress);
   const collector = new DiagnosticCollector(resolved.onWarning);
 
+  run.checkpoint();
+  run.emit('extract', 0);
   const tExtract = now();
   const prepared = prepareModel(source, resolved, collector);
   const extractMs = elapsed(tExtract);
   await yieldToEventLoop();
+  run.checkpoint();
 
+  run.emit('translate', WRITE_START / 4);
   const { translated, translateMs, imageMs } = await translateWithImage(
     source,
     prepared,
@@ -272,8 +391,10 @@ async function runSingle(source: Source, options: ExportOptions | undefined): Pr
       sheets: translated.translation.sheets,
     },
     resolved.writer,
+    run,
   );
   const writeMs = elapsed(tWrite);
+  const zipMs = Math.min(writeMs, run.zipMs());
 
   const result: ExportResult = {
     bytes,
@@ -281,9 +402,10 @@ async function runSingle(source: Source, options: ExportOptions | undefined): Pr
     mimeType: XLSX_MIME_TYPE,
     warnings: translated.warnings,
     report: translated.report,
-    timings: { extractMs, translateMs, writeMs, imageMs, totalMs: elapsed(t0) },
+    timings: { extractMs, translateMs, writeMs, zipMs, imageMs, totalMs: elapsed(t0) },
   };
   if (resolved.includeModel) result.model = model;
+  run.emit('done', 1);
   return result;
 }
 
@@ -292,13 +414,16 @@ async function runSingle(source: Source, options: ExportOptions | undefined): Pr
  * native Excel chart that references the worksheet cells. Never triggers a download.
  *
  * In a browser the export yields to the event loop between the extract, translate and write
- * phases so the page can repaint (e.g. a spinner); each phase itself is synchronous.
+ * phases and, inside the built-in writer, between chunks of cells and chart cache points, so the
+ * page can repaint (e.g. a spinner); the package is then zipped in Web Workers. Extraction and
+ * translation are each synchronous. `signal` cancels it; `onProgress` reports it.
  *
  * @throws ExportError INVALID_OPTIONS for invalid options; INVALID_CHART for non-charts;
  *   CHART_NOT_EDITABLE when no native chart can be produced (or, with `strictMode`, when any
- *   feature is dropped); WRITER_FAILURE on writer errors (the writer's error is `error.cause`).
- *   Errors thrown by your own callbacks (`onWarning`, `hooks.transformModel`) propagate unwrapped,
- *   as thrown.
+ *   feature is dropped); WRITER_FAILURE on writer errors (the writer's error is `error.cause`);
+ *   ABORTED once `signal` is aborted (`error.cause` is `signal.reason`).
+ *   Errors thrown by your own callbacks (`onWarning`, `onProgress`, `hooks.transformModel`)
+ *   propagate unwrapped, as thrown.
  */
 export async function exportHighchartsToXlsx(chart: unknown, options?: ExportOptions): Promise<ExportResult> {
   return runSingle({ kind: 'chart', chart }, options);
@@ -336,9 +461,11 @@ export function analyzeChartCompatibility(chart: unknown, options?: ExportOption
  * An entry's `strictMode` overrides the workbook-wide `strictMode`. The reference image, when an
  * entry asks for one, is rendered only after that entry is known to be exportable.
  *
+ * `signal` and `onProgress` are workbook-wide (second argument); in entry options they are ignored.
+ *
  * @throws ExportError CHART_NOT_EDITABLE naming the entry index when a chart cannot be exported;
- *   INVALID_OPTIONS for invalid entries or options. Errors thrown by your own callbacks propagate
- *   unwrapped.
+ *   INVALID_OPTIONS for invalid entries or options; ABORTED once `signal` is aborted. Errors
+ *   thrown by your own callbacks propagate unwrapped.
  */
 export async function exportChartsToWorkbook(
   entries: MultiChartExportEntry[],
@@ -347,6 +474,8 @@ export async function exportChartsToWorkbook(
     properties?: ExportOptions['properties'];
     strictMode?: boolean;
     writer?: ExcelWriter;
+    signal?: AbortSignal;
+    onProgress?: (progress: ExportProgress) => void;
   } = {},
 ): Promise<MultiChartExportResult> {
   if (!Array.isArray(entries) || entries.length === 0) {
@@ -360,6 +489,9 @@ export async function exportChartsToWorkbook(
     ...(options.filename !== undefined ? { filename: options.filename } : {}),
     ...(options.writer !== undefined ? { writer: options.writer } : {}),
   });
+  validateRuntimeOptions(options);
+  const run = new ExportRun(options.signal, options.onProgress);
+  run.checkpoint();
   const taken = new Set<string>();
   const sheets: SheetSpec[] = [];
   const charts: MultiChartExportResult['charts'] = [];
@@ -370,13 +502,18 @@ export async function exportChartsToWorkbook(
       throw new ExportError('INVALID_OPTIONS', `Entry ${i} must be an object of the form { chart, options }.`);
     }
     const n = i + 1;
-    const entryOptions: ExportOptions = { ...(entry.options ?? {}) };
+    // signal / onProgress are workbook-wide: the entry's own are replaced by the workbook's.
+    const { signal: _signal, onProgress: _onProgress, ...entryOptions }: ExportOptions = { ...(entry.options ?? {}) };
     const resolved = resolveExportOptions({
       ...entryOptions,
       chartSheetName: entryOptions.chartSheetName ?? `Chart ${n}`,
       dataSheetName: entryOptions.dataSheetName ?? `Data ${n}`,
       strictMode: entryOptions.strictMode ?? options.strictMode ?? false,
+      ...(options.signal ? { signal: options.signal } : {}),
     });
+    const span = WRITE_START / entries.length;
+    run.checkpoint();
+    run.emit('extract', span * i, `chart entry ${i}`);
     const collector = new DiagnosticCollector(resolved.onWarning);
     const source: Source = { kind: 'chart', chart: entry.chart };
     let prepared: Prepared;
@@ -389,6 +526,8 @@ export async function exportChartsToWorkbook(
       throw error;
     }
     await yieldToEventLoop();
+    run.checkpoint();
+    run.emit('translate', span * (i + 0.25), `chart entry ${i}`);
     const { translated } = await translateWithImage(source, prepared, resolved, taken, `Chart entry ${i}`);
     const { translation } = translated;
     taken.add(translation.chartSheetName);
@@ -410,6 +549,8 @@ export async function exportChartsToWorkbook(
       sheets,
     },
     options.writer,
+    run,
   );
+  run.emit('done', 1);
   return { bytes, filename: sanitizeFilename(options.filename ?? 'charts'), mimeType: XLSX_MIME_TYPE, charts };
 }

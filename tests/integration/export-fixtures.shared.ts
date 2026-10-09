@@ -508,6 +508,74 @@ export const EXPORT_CASES: ExportCase[] = [
       expect(result.warnings.map((w) => w.code)).toContain('SECONDARY_AXIS');
     },
   },
+  {
+    name: 'polar',
+    fixture: F.polarChart,
+    excelType: 'radar',
+    groups: ['radarChart'],
+    check: ({ chartXml, result }) => {
+      expect(chartXml).toContain('<c:radarStyle val="marker"/>');
+      expect(axisElements(chartXml).map((a) => a.kind)).toEqual(['catAx', 'valAx']);
+      expect(result.warnings).toContainEqual(
+        expect.objectContaining({ code: 'APPROXIMATED_CHART_TYPE', property: 'chart.polar' }),
+      );
+    },
+  },
+  {
+    name: 'errorbar',
+    fixture: F.errorBarChart,
+    excelType: 'column',
+    groups: ['barChart'],
+    categories: false,
+    check: ({ x, chartXml }) => {
+      const sers = serBlocks(chartXml);
+      expect(sers).toHaveLength(1);
+      expect(seriesColor(sers[0]!)).toBe('2CAFFE');
+      const eb = /<c:errBars>([\s\S]*?)<\/c:errBars>/.exec(sers[0]!)?.[1];
+      expect(eb, 'no c:errBars').toBeDefined();
+      expect(eb).toContain('<c:errBarType val="both"/><c:errValType val="cust"/>');
+      const plusF = decodeXmlEntities(/<c:plus><c:numRef><c:f>([^<]+)<\/c:f>/.exec(eb!)![1]!);
+      const minusF = decodeXmlEntities(/<c:minus><c:numRef><c:f>([^<]+)<\/c:f>/.exec(eb!)![1]!);
+      const round = (v: Array<string | number | null>) =>
+        v.map((n) => (typeof n === 'number' ? Math.round(n * 100) / 100 : n));
+      // plus = high - y, minus = y - low
+      expect(round(valuesAtRange(x, plusF))).toEqual([1.1, 1.5, 3.6, 6.8]);
+      expect(round(valuesAtRange(x, minusF))).toEqual([1.9, 3.5, 14.4, 1.2]);
+      expect(x.cellValue(x.sheetPath('Data'), 'C1')).toBe('Rainfall +err');
+      expect(eb).toContain('<a:srgbClr val="000000"/>');
+    },
+  },
+  {
+    name: 'columnrange',
+    fixture: F.columnRangeChart,
+    excelType: 'stackedColumn',
+    groups: ['barChart'],
+    categories: false,
+    check: ({ x, chartXml }) => {
+      const data = x.sheetPath('Data');
+      expect([1, 2, 3, 4, 5, 6].map((c) => x.cellValue(data, `${String.fromCharCode(64 + c)}1`))).toEqual([
+        'Category',
+        'Temperatures Low',
+        'Temperatures High',
+        'Temperatures Base',
+        'Temperatures Up',
+        'Temperatures Down',
+      ]);
+      // Library formulas over the Low/High cells, with cached values.
+      expect(x.cellXml(data, 'D2')).toContain('<f>MAX(0,B2)+MIN(0,C2)</f>');
+      expect(x.cellXml(data, 'E2')).toContain('<f>MAX(0,C2)-MAX(0,B2)</f><v>8</v>');
+      expect(x.cellXml(data, 'F2')).toContain('<f>MIN(0,B2)-MIN(0,C2)</f><v>-9.5</v>');
+      const sers = serBlocks(chartXml);
+      expect(sers).toHaveLength(3);
+      expect(sers[0]).toContain('<a:noFill/>');
+      expect(seriesColor(sers[1]!)).toBe('2CAFFE');
+      expect(seriesColor(sers[2]!)).toBe('2CAFFE');
+      expect(chartXml).toContain('<c:overlap val="100"/>');
+      expect(
+        [...chartXml.matchAll(/<c:legendEntry><c:idx val="(\d+)"\/><c:delete val="1"\/>/g)].map((m) => m[1]),
+      ).toEqual(['0', '2']);
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -555,7 +623,7 @@ export function runExportFixtureSuite(Highcharts: HighchartsLike, version: 'v11'
         }
 
         // Series colors follow the live chart (pie/doughnut use per-point colors instead).
-        if (!['pie', 'doughnut', 'styled-mode'].includes(c.name)) {
+        if (!['pie', 'doughnut', 'styled-mode', 'errorbar', 'columnrange'].includes(c.name)) {
           const sers = serBlocks(chartXml);
           const visible = (chart.series as AnyChart[]).filter((s) => s.visible !== false);
           expect(sers).toHaveLength(visible.length);

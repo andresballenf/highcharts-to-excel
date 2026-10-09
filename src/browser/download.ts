@@ -2,7 +2,7 @@
  * Browser download helpers.
  */
 
-import { exportHighchartsToXlsx } from '../api/export';
+import { abortedError, exportHighchartsToXlsx } from '../api/export';
 import { ExportError, XLSX_MIME_TYPE, type ExportOptions, type ExportResult } from '../types/public-api';
 
 /**
@@ -58,10 +58,13 @@ export function triggerDownload(bytes: Uint8Array, filename: string, mimeType: s
 /**
  * Exports the chart and immediately downloads the workbook. Library errors propagate as
  * ExportError (see `exportHighchartsToXlsx`); errors thrown by your own callbacks (`onWarning`,
- * `hooks.transformModel`) propagate unwrapped.
+ * `onProgress`, `hooks.transformModel`) propagate unwrapped. Once `options.signal` is aborted it
+ * rejects with ExportError ABORTED and never starts the download.
  */
 export async function downloadHighchartsAsXlsx(chart: unknown, options?: ExportOptions): Promise<ExportResult> {
   const result = await exportHighchartsToXlsx(chart, options);
+  const signal = options?.signal;
+  if (signal?.aborted) throw abortedError(signal);
   triggerDownload(result.bytes, result.filename, result.mimeType);
   return result;
 }

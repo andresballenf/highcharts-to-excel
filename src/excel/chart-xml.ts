@@ -70,39 +70,84 @@ function cacheNumber(v: unknown): number | null {
   return null;
 }
 
-export function numRefXml(ref: ExcelSeriesRef<unknown>, what: string): string {
-  checkPointCount(ref.cache.length, what);
+export type CacheKind = 'num' | 'str';
+
+/**
+ * Cache points (`<c:pt>` elements) already serialized for a reference, e.g. by a writer that
+ * builds large caches in chunks (see `cachePointsXml`). Returning undefined builds them in place.
+ */
+export type CachePointsLookup = (ref: ExcelSeriesRef<unknown>, kind: CacheKind) => string | undefined;
+
+/**
+ * The `<c:pt>` elements for cache indices `from` (inclusive) to `to` (exclusive). Concatenating
+ * consecutive ranges gives exactly the full cache, so a writer can build it in chunks.
+ */
+export function cachePointsXml(ref: ExcelSeriesRef<unknown>, kind: CacheKind, from: number, to: number): string {
+  const cache = ref.cache;
   const pts: string[] = [];
-  ref.cache.forEach((v, i) => {
-    const n = cacheNumber(v);
-    if (n !== null) pts.push(`<c:pt idx="${i}"><c:v>${formatNumber(n)}</c:v></c:pt>`);
-  });
+  const end = Math.min(to, cache.length);
+  for (let i = from; i < end; i++) {
+    // Holes of sparse arrays read as undefined and are skipped below, as forEach skipped them.
+    const v = cache[i];
+    if (kind === 'num') {
+      const n = cacheNumber(v);
+      if (n !== null) pts.push(`<c:pt idx="${i}"><c:v>${formatNumber(n)}</c:v></c:pt>`);
+      continue;
+    }
+    if (v === null || v === undefined) continue;
+    if (typeof v === 'number') {
+      if (Number.isFinite(v)) pts.push(`<c:pt idx="${i}"><c:v>${formatNumber(v)}</c:v></c:pt>`);
+      continue;
+    }
+    pts.push(`<c:pt idx="${i}"><c:v>${escapeXstring(String(v))}</c:v></c:pt>`);
+  }
+  return pts.join('');
+}
+
+/**
+ * Every cache reference `buildChartXml` writes points for, in document order: categories / X
+ * values, values, bubble sizes. Tolerates malformed specs (they are rejected by `buildChartXml`).
+ */
+export function chartCacheRefs(spec: ExcelChartSpec): Array<{ ref: ExcelSeriesRef<unknown>; kind: CacheKind }> {
+  const out: Array<{ ref: ExcelSeriesRef<unknown>; kind: CacheKind }> = [];
+  const add = (ref: ExcelSeriesRef<unknown> | null | undefined, kind: CacheKind): void => {
+    if (ref && typeof ref === 'object' && Array.isArray(ref.cache)) out.push({ ref, kind });
+  };
+  for (const g of Array.isArray(spec?.plotGroups) ? spec.plotGroups : []) {
+    for (const s of Array.isArray(g?.series) ? g.series : []) {
+      if (!s || typeof s !== 'object') continue;
+      if (s.errorBars && typeof s.errorBars === 'object') {
+        add(s.errorBars.plus, 'num');
+        add(s.errorBars.minus, 'num');
+      }
+      add(s.categories, s.categories?.kind === 'num' ? 'num' : 'str');
+      add(s.values, 'num');
+      if (g.kind === 'bubble') add(s.bubbleSizes, 'num');
+    }
+  }
+  return out;
+}
+
+export function numRefXml(ref: ExcelSeriesRef<unknown>, what: string, points?: string): string {
+  checkPointCount(ref.cache.length, what);
+  const pts = points ?? cachePointsXml(ref, 'num', 0, ref.cache.length);
   const code =
     ref.formatCode && ref.formatCode !== '' ? assertExcelFormatCode(ref.formatCode, `chart ${what} cache`) : 'General';
   return (
     '<c:numRef>' +
     formulaXml(ref.formula, what) +
-    `<c:numCache><c:formatCode>${escapeXml(code)}</c:formatCode><c:ptCount val="${ref.cache.length}"/>${pts.join('')}</c:numCache>` +
+    `<c:numCache><c:formatCode>${escapeXml(code)}</c:formatCode><c:ptCount val="${ref.cache.length}"/>${pts}</c:numCache>` +
     '</c:numRef>'
   );
 }
 
-export function strRefXml(ref: ExcelSeriesRef<unknown>, what: string): string {
+export function strRefXml(ref: ExcelSeriesRef<unknown>, what: string, points?: string): string {
   checkPointCount(ref.cache.length, what);
-  const pts: string[] = [];
-  ref.cache.forEach((v, i) => {
-    if (v === null || v === undefined) return;
-    if (typeof v === 'number') {
-      if (!Number.isFinite(v)) return;
-      pts.push(`<c:pt idx="${i}"><c:v>${formatNumber(v)}</c:v></c:pt>`);
-      return;
-    }
-    pts.push(`<c:pt idx="${i}"><c:v>${escapeXstring(String(v))}</c:v></c:pt>`);
-  });
+  const pts = points ?? cachePointsXml(ref, 'str', 0, ref.cache.length);
   return (
     '<c:strRef>' +
     formulaXml(ref.formula, what) +
-    `<c:strCache><c:ptCount val="${ref.cache.length}"/>${pts.join('')}</c:strCache>` +
+    `<c:strCache><c:ptCount val="${ref.cache.length}"/>${pts}</c:strCache>` +
     '</c:strRef>'
   );
 }
@@ -119,9 +164,14 @@ function seriesTxXml(name: ExcelSeriesSpec['name']): string {
   return `<c:tx><c:v>${escapeXstring(name.text ?? '')}</c:v></c:tx>`;
 }
 
-function categoriesXml(tag: 'c:cat' | 'c:xVal', cats: ExcelSeriesSpec['categories']): string {
+function categoriesXml(
+  tag: 'c:cat' | 'c:xVal',
+  cats: ExcelSeriesSpec['categories'],
+  lookup: CachePointsLookup | null,
+): string {
   if (!cats) return '';
-  const inner = cats.kind === 'num' ? numRefXml(cats, tag) : strRefXml(cats, tag);
+  const inner =
+    cats.kind === 'num' ? numRefXml(cats, tag, lookup?.(cats, 'num')) : strRefXml(cats, tag, lookup?.(cats, 'str'));
   return `<${tag}>${inner}</${tag}>`;
 }
 
@@ -138,14 +188,17 @@ const VALID_DLBL_POS: Record<GroupKind | 'barStacked', ReadonlySet<ExcelDataLabe
   pie: new Set(['ctr', 'inEnd', 'outEnd', 'bestFit']),
   area: new Set(),
   doughnut: new Set(),
+  radar: new Set(),
 };
 
 interface GroupCtx {
   kind: GroupKind;
   stacked: boolean;
-  /** Line group with showMarkers=false. */
+  /** Line group with showMarkers=false, or a radar group whose style draws no markers. */
   hideMarkers: boolean;
   scatterStyle: string | null;
+  /** Pre-built cache points, when the writer built them in chunks. */
+  cachePoints: CachePointsLookup | null;
 }
 
 function dLblPosXml(pos: ExcelDataLabelPosition | null, ctx: GroupCtx): string {
@@ -213,7 +266,7 @@ function markerXml(marker: ExcelMarkerSpec | null, ctx: GroupCtx): string {
   if (!marker) {
     // Honour group-level intent where Excel would otherwise draw automatic markers.
     const noMarkers =
-      (ctx.kind === 'line' && ctx.hideMarkers) ||
+      ((ctx.kind === 'line' || ctx.kind === 'radar') && ctx.hideMarkers) ||
       (ctx.kind === 'scatter' &&
         (ctx.scatterStyle === 'line' || ctx.scatterStyle === 'smooth' || ctx.scatterStyle === 'none'));
     return noMarkers ? '<c:marker><c:symbol val="none"/></c:marker>' : '';
@@ -229,7 +282,7 @@ function markerXml(marker: ExcelMarkerSpec | null, ctx: GroupCtx): string {
 }
 
 function dPtXml(dp: ExcelSeriesSpec['dataPoints'][number], ctx: GroupCtx): string {
-  const hasMarker = ctx.kind === 'line' || ctx.kind === 'scatter';
+  const hasMarker = ctx.kind === 'line' || ctx.kind === 'scatter' || ctx.kind === 'radar';
   const marker = hasMarker && dp.marker ? markerXml(dp.marker, ctx) : '';
   const explosion =
     (ctx.kind === 'pie' || ctx.kind === 'doughnut') && dp.explosion !== null && Number.isFinite(dp.explosion)
@@ -295,12 +348,38 @@ function seriesShapeXml(s: ExcelSeriesSpec, ctx: GroupCtx): string {
   return spPrXml(s.shape.fill, line);
 }
 
-function bubbleSizeXml(s: ExcelSeriesSpec): string {
-  if (s.bubbleSizes) return `<c:bubbleSize>${numRefXml(s.bubbleSizes, 'bubbleSize')}</c:bubbleSize>`;
+function bubbleSizeXml(s: ExcelSeriesSpec, lookup: CachePointsLookup | null): string {
+  if (s.bubbleSizes)
+    return `<c:bubbleSize>${numRefXml(s.bubbleSizes, 'bubbleSize', lookup?.(s.bubbleSizes, 'num'))}</c:bubbleSize>`;
   // No sizes supplied: equal-size bubbles via a literal, so the series still renders.
   const n = s.values.cache.length;
   const pts = Array.from({ length: n }, (_, i) => `<c:pt idx="${i}"><c:v>1</c:v></c:pt>`).join('');
   return `<c:bubbleSize><c:numLit><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${pts}</c:numLit></c:bubbleSize>`;
+}
+
+/**
+ * CT_ErrBars (errDir?, errBarType, errValType, noEndCap?, plus?, minus?, val?, spPr?): custom
+ * values in both directions. `errDir` is written for scatter/bubble only (Y bars); on bar, line and
+ * area series the direction is implied by the value axis.
+ */
+function errBarsXml(s: ExcelSeriesSpec, ctx: GroupCtx): string {
+  const eb = s.errorBars;
+  if (!eb) return '';
+  const supported =
+    ctx.kind === 'bar' || ctx.kind === 'line' || ctx.kind === 'area' || ctx.kind === 'scatter' || ctx.kind === 'bubble';
+  if (!supported) throw new Error(`Chart series ${s.idx}: error bars are not available on ${ctx.kind} charts`);
+  const lookup = ctx.cachePoints;
+  return (
+    '<c:errBars>' +
+    (ctx.kind === 'scatter' || ctx.kind === 'bubble' ? valEl('c:errDir', 'y') : '') +
+    valEl('c:errBarType', 'both') +
+    valEl('c:errValType', 'cust') +
+    valEl('c:noEndCap', 0) +
+    `<c:plus>${numRefXml(eb.plus, 'errBars plus', lookup?.(eb.plus, 'num'))}</c:plus>` +
+    `<c:minus>${numRefXml(eb.minus, 'errBars minus', lookup?.(eb.minus, 'num'))}</c:minus>` +
+    spPrXml(null, eb.line) +
+    '</c:errBars>'
+  );
 }
 
 function smoothXml(s: ExcelSeriesSpec, ctx: GroupCtx): string {
@@ -325,22 +404,39 @@ export function seriesXml(s: ExcelSeriesSpec, ctx: GroupCtx): string {
     .filter((dp) => dp.dataLabels !== null && dp.dataLabels !== undefined)
     .map((dp) => ({ idx: dp.idx, labels: dp.dataLabels! }));
   const dLbls = dLblsXml(s.dataLabels, perPoint, ctx);
+  // Schema order: … dLbls, trendline*, errBars, cat/xVal …
+  const errBars = errBarsXml(s, ctx);
   const invert = valEl('c:invertIfNegative', s.invertIfNegative ? 1 : 0);
-  const val = `<c:val>${numRefXml(s.values, 'values')}</c:val>`;
+  const lookup = ctx.cachePoints;
+  const valuePoints = lookup?.(s.values, 'num');
+  const val = `<c:val>${numRefXml(s.values, 'values', valuePoints)}</c:val>`;
 
   let body: string;
   switch (ctx.kind) {
     case 'bar':
-      body = head + invert + dPts + dLbls + categoriesXml('c:cat', s.categories) + val;
+      body = head + invert + dPts + dLbls + errBars + categoriesXml('c:cat', s.categories, lookup) + val;
       break;
     case 'line':
       body =
-        head + markerXml(s.marker, ctx) + dPts + dLbls + categoriesXml('c:cat', s.categories) + val + smoothXml(s, ctx);
+        head +
+        markerXml(s.marker, ctx) +
+        dPts +
+        dLbls +
+        errBars +
+        categoriesXml('c:cat', s.categories, lookup) +
+        val +
+        smoothXml(s, ctx);
       break;
     case 'area':
+      body = head + dPts + dLbls + errBars + categoriesXml('c:cat', s.categories, lookup) + val;
+      break;
+    case 'radar':
+      // CT_RadarSer: idx, order, tx, spPr, marker, dPt*, dLbls, cat, val (no smoothing).
+      body = head + markerXml(s.marker, ctx) + dPts + dLbls + categoriesXml('c:cat', s.categories, lookup) + val;
+      break;
     case 'pie':
     case 'doughnut':
-      body = head + dPts + dLbls + categoriesXml('c:cat', s.categories) + val;
+      body = head + dPts + dLbls + categoriesXml('c:cat', s.categories, lookup) + val;
       break;
     case 'scatter':
       body =
@@ -348,8 +444,9 @@ export function seriesXml(s: ExcelSeriesSpec, ctx: GroupCtx): string {
         markerXml(s.marker, ctx) +
         dPts +
         dLbls +
-        categoriesXml('c:xVal', s.categories) +
-        `<c:yVal>${numRefXml(s.values, 'yVal')}</c:yVal>` +
+        errBars +
+        categoriesXml('c:xVal', s.categories, lookup) +
+        `<c:yVal>${numRefXml(s.values, 'yVal', valuePoints)}</c:yVal>` +
         smoothXml(s, ctx);
       break;
     case 'bubble':
@@ -358,9 +455,10 @@ export function seriesXml(s: ExcelSeriesSpec, ctx: GroupCtx): string {
         invert +
         dPts +
         dLbls +
-        categoriesXml('c:xVal', s.categories) +
-        `<c:yVal>${numRefXml(s.values, 'yVal')}</c:yVal>` +
-        bubbleSizeXml(s) +
+        errBars +
+        categoriesXml('c:xVal', s.categories, lookup) +
+        `<c:yVal>${numRefXml(s.values, 'yVal', valuePoints)}</c:yVal>` +
+        bubbleSizeXml(s, lookup) +
         valEl('c:bubble3D', 0);
       break;
     default: {
@@ -379,15 +477,16 @@ function axIdsXml(ids: [number, number]): string {
   return valEl('c:axId', checkIdx(ids[0], 'axis id')) + valEl('c:axId', checkIdx(ids[1], 'axis id'));
 }
 
-export function plotGroupXml(g: PlotGroupSpec): string {
+export function plotGroupXml(g: PlotGroupSpec, cachePoints: CachePointsLookup | null = null): string {
   const ctx: GroupCtx = {
     kind: g.kind,
     stacked:
       (g.kind === 'bar' || g.kind === 'line' || g.kind === 'area') &&
       g.grouping !== 'clustered' &&
       g.grouping !== 'standard',
-    hideMarkers: g.kind === 'line' && !g.showMarkers,
+    hideMarkers: (g.kind === 'line' && !g.showMarkers) || (g.kind === 'radar' && g.radarStyle !== 'marker'),
     scatterStyle: g.kind === 'scatter' ? g.scatterStyle : null,
+    cachePoints,
   };
   const ser = g.series.map((s) => seriesXml(s, ctx)).join('');
   const dLbls = dLblsXml(g.dataLabels, [], ctx);
@@ -443,6 +542,17 @@ export function plotGroupXml(g: PlotGroupSpec): string {
         valEl('c:showNegBubbles', 0) +
         axIdsXml(g.axisIds) +
         '</c:bubbleChart>'
+      );
+    case 'radar':
+      // CT_RadarChart: radarStyle, varyColors, ser*, dLbls, axId, axId.
+      return (
+        '<c:radarChart>' +
+        valEl('c:radarStyle', g.radarStyle === 'filled' || g.radarStyle === 'marker' ? g.radarStyle : 'standard') +
+        vary +
+        ser +
+        dLbls +
+        axIdsXml(g.axisIds) +
+        '</c:radarChart>'
       );
     case 'pie':
       return (
@@ -663,7 +773,11 @@ function legendXml(legend: ExcelChartSpec['legend']): string {
   );
 }
 
-export function buildChartXml(spec: ExcelChartSpec): string {
+/**
+ * @param options.cachePoints Pre-built `<c:pt>` runs per cache reference (see `cachePointsXml`);
+ *   the output is byte-identical with or without them.
+ */
+export function buildChartXml(spec: ExcelChartSpec, options: { cachePoints?: CachePointsLookup } = {}): string {
   if (spec.plotGroups.length === 0) throw new Error('Chart has no plot groups');
   validateSeries(spec);
   const axesById = validateAxes(spec);
@@ -684,7 +798,7 @@ export function buildChartXml(spec: ExcelChartSpec): string {
   const plotArea =
     '<c:plotArea>' +
     manualLayoutXml(spec.plotArea.manualLayout) +
-    spec.plotGroups.map(plotGroupXml).join('') +
+    spec.plotGroups.map((g) => plotGroupXml(g, options.cachePoints ?? null)).join('') +
     spec.axes.map((ax) => axisXml(ax, crossBetweenFor(ax))).join('') +
     spPrXml(spec.plotArea.fill, spec.plotArea.line) +
     '</c:plotArea>';

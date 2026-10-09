@@ -9,8 +9,15 @@ const LICENSE_BANNER =
   'MIT License, Copyright (c) 2026 Arjun Barrett | full license texts: THIRD_PARTY_LICENSES.md */';
 
 export default defineConfig({
-  entry: { index: 'src/index.ts' },
-  // ESM (index.js) for bundlers and Node `import`; CJS (index.cjs) for `require`.
+  // `index` is the stable entry, `internals` the experimental pipeline, `augment` the opt-in
+  // TypeScript augmentation of `Highcharts.ExportingOptions` (an empty runtime module).
+  entry: {
+    index: 'src/index.ts',
+    internals: 'src/internals.ts',
+    augment: 'src/augment.ts',
+    chartjs: 'src/chartjs/index.ts',
+  },
+  // ESM (*.js) for bundlers and Node `import`; CJS (*.cjs) for `require`.
   format: ['esm', 'cjs'],
   dts: true,
   banner: { js: LICENSE_BANNER },
@@ -23,5 +30,5 @@ export default defineConfig({
   target: 'es2022',
   platform: 'browser',
   treeshake: true,
-  external: ['highcharts'],
+  external: ['highcharts', 'chart.js'],
 });

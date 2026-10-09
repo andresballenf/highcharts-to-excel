@@ -41,8 +41,12 @@ Each card also has:
 **Export all charts to one workbook** uses `exportChartsToWorkbook` + `triggerDownload`: one
 chart sheet and one data sheet per chart.
 
-`window.__demo = { charts, lastResults }` exposes the chart instances and the last result per card
+`window.__demo = { charts, lastResults, highcharts, ready, exportWithImage }` exposes the chart instances, the last result per card, the Highcharts namespace, a readiness flag and an image-export helper
 (used by the Playwright tests in `e2e/`, handy in the devtools console too).
+
+### Branded export button
+
+The page-wide `installHighchartsExcelExport` call brands every chart's export menu: a custom download-arrow button (`button.svgPath`, green fill/stroke), the inline Excel icon in the menu item (`menuIcon: 'excel'`) and green dropdown styles (`menuStyle`, `menuItemStyle`, `menuItemHoverStyle`). The "Branded export button" card adds **Deutsch** / **English** buttons that set `lang.downloadEditableXLSX` via `Highcharts.setOptions` and re-create that chart, showing `langKey`-based translation.
 
 ## Inspecting warnings
 

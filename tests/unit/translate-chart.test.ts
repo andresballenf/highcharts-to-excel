@@ -354,16 +354,16 @@ describe('translateChartModel: pie and doughnut', () => {
     expect(codes(run(F.pieModel()).d)).not.toContain('HIDDEN_POINT');
   });
 
-  it('doughnut rings map points to the union rows', () => {
+  it('doughnut rings with different slices map points to their own rows', () => {
     const { chart, d } = run(F.doughnutModel());
     const g = group(chart, 'doughnut');
     expect(g.holeSize).toBe(40);
     expect(g.series).toHaveLength(2);
     expect(g.series[1]!.dataPoints.map((p) => [p.idx, p.shape?.fill])).toEqual([
       [0, { type: 'solid', hex: '00E272', alpha: 1 }],
-      [2, { type: 'solid', hex: 'FE6A35', alpha: 1 }],
+      [1, { type: 'solid', hex: 'FE6A35', alpha: 1 }],
     ]);
-    expect(codes(d)).toContain('APPROXIMATED_LAYOUT');
+    expect(d.items.filter((x) => x.code === 'APPROXIMATED_LAYOUT' && x.property === 'series[1].data')).toEqual([]);
   });
 });
 
@@ -550,7 +550,7 @@ describe('translateChartModel: sheet names', () => {
 
 describe('translateChartModel: blocking', () => {
   it.each([
-    ['polarModel', 'UNSUPPORTED_POLAR'],
+    ['polarColumnModel', 'UNSUPPORTED_POLAR'],
     ['unknownTypeModel', 'UNSUPPORTED_CHART_TYPE'],
     ['emptyModel', 'EMPTY_CHART'],
   ] as const)('%s is blocking with %s', (name, code) => {

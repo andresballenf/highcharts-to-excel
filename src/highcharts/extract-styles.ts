@@ -21,6 +21,7 @@ import { DEFAULT_HIGHCHARTS_FONT, toFont, type CssStyleLike } from '../translato
 import { HIGHCHARTS_DEFAULT_PALETTE, parseColor, type CssVariableResolver } from '../utils/colors';
 import { readEffectiveStyle } from './css-resolver';
 import { arr, bool, deepMerge, get, num, plainText, rec, str, type Rec } from './guards';
+import { showsPointsInLegend } from './series-types';
 import type { ChartView, HcChartLike, SeriesView } from './types';
 
 /**
@@ -135,14 +136,12 @@ function textBlock(view: ChartView, which: 'title' | 'subtitle'): TextBlock | nu
   };
 }
 
-const NON_LEGEND_TYPES = new Set(['pie', 'variablepie', 'funnel', 'pyramid']);
-
 /**
  * Highcharts `showInLegend`: explicit option, else true except for pie-like series (whose legend,
  * when enabled, lists points rather than the series).
  */
 export function seriesShowsInLegend(s: SeriesView): boolean {
-  return bool(s.opts.showInLegend) ?? !NON_LEGEND_TYPES.has(s.type);
+  return bool(s.opts.showInLegend) ?? !showsPointsInLegend(s.type);
 }
 
 function legendPosition(align: string, verticalAlign: string, diagnostics: DiagnosticCollector): LegendPosition {
@@ -198,6 +197,10 @@ export function extractChartStyles(view: ChartView, diagnostics: DiagnosticColle
     // Styled mode: colors live in CSS. Read the rendered background in a browser; else white.
     const computed = readEffectiveStyle(view.rt?.chartBackground?.element, ['fill']);
     background = computed.fill ? fillAt(computed.fill, view, diagnostics, 'chart.backgroundColor') : null;
+    const bgVariable = view.cssVariables?.['--highcharts-background-color'];
+    if (!background && typeof bgVariable === 'string') {
+      background = fillAt('var(--highcharts-background-color)', view, diagnostics, 'chart.backgroundColor');
+    }
     background ??= fillAt('#ffffff', view, diagnostics, 'chart.backgroundColor');
   } else {
     background = fillAt(
@@ -228,4 +231,20 @@ export function extractChartStyles(view: ChartView, diagnostics: DiagnosticColle
     subtitle: textBlock(view, 'subtitle'),
     legend: extractLegend(view, diagnostics),
   };
+}
+
+/**
+ * `lang.thousandsSep` / `lang.decimalPoint` of the chart (merged options on a live chart), for
+ * `translateFormatString`, which reports APPROXIMATED_NUMBER_FORMAT (once per chart: property
+ * `lang.thousandsSep` / `lang.decimalPoint`) when a translated format uses a separator that differs
+ * from Excel's locale-driven `,` / `.`. Unset separators (Highcharts 12+ default: locale) are omitted.
+ */
+export function langSeparators(view: ChartView): { thousandsSep?: string; decimalPoint?: string } {
+  const lang = rec(view.opts.lang) ?? {};
+  const out: { thousandsSep?: string; decimalPoint?: string } = {};
+  const t = str(lang.thousandsSep);
+  const d = str(lang.decimalPoint);
+  if (t !== undefined) out.thousandsSep = t;
+  if (d !== undefined) out.decimalPoint = d;
+  return out;
 }

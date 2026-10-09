@@ -20,7 +20,14 @@ import {
   type Diagnostic,
   type ExportTimings,
 } from 'highcharts-editable-excel';
-import { demoCharts, deterministicValue, type DemoChart } from './charts';
+import {
+  BRAND_COLOR,
+  DOWNLOAD_ARROW_PATH,
+  GERMAN_MENU_TEXT,
+  demoCharts,
+  deterministicValue,
+  type DemoChart,
+} from './charts';
 
 /** What the page remembers about the last export/analysis of each chart (read by the e2e tests). */
 export interface DemoResult {
@@ -39,6 +46,8 @@ export interface DemoHandle {
   ready: boolean;
   /** Exports one chart with `includeReferenceImage: true` (no download) and returns the bytes. */
   exportWithImage: (name: string) => Promise<{ bytes: number[]; warnings: Diagnostic[] }>;
+  /** The page's Highcharts namespace (lets the e2e tests render an unbranded reference button). */
+  highcharts: typeof Highcharts;
 }
 
 declare global {
@@ -59,6 +68,7 @@ window.__demo = {
     const result = await exportHighchartsToXlsx(chart, { includeReferenceImage: true });
     return { bytes: Array.from(result.bytes), warnings: result.warnings };
   },
+  highcharts: Highcharts,
 };
 
 // Deterministic rendering: no animation; the accessibility module is not loaded in this demo.
@@ -75,10 +85,17 @@ scopedCss.id = 'highcharts-styled-mode-css';
 scopedCss.textContent = `.hc-styled-scope {\n${highchartsStyledModeCss.replaceAll(':root', '&')}\n}`;
 document.head.prepend(scopedCss);
 
-// One install for the whole page: every chart created afterwards gets the menu item.
+// One install for the whole page: every chart created afterwards gets the menu item, with the
+// branded context button (a download arrow), an Excel icon and green menu styles. The item text
+// comes from lang.downloadEditableXLSX (the default langKey): see the "Deutsch" button.
 installHighchartsExcelExport(Highcharts, {
   onExport: (result, chart) => showResult(nameOf(chart), { kind: 'export', ...result }),
   onError: (error, chart) => showError(nameOf(chart), error),
+  menuIcon: 'excel',
+  button: { svgPath: DOWNLOAD_ARROW_PATH, symbolFill: BRAND_COLOR, symbolStroke: BRAND_COLOR, symbolStrokeWidth: 2 },
+  menuStyle: { border: `1px solid ${BRAND_COLOR}`, borderRadius: '6px', boxShadow: '0 4px 12px rgba(0,0,0,.15)' },
+  menuItemStyle: { fontFamily: 'system-ui', fontSize: '13px', padding: '6px 14px' },
+  menuItemHoverStyle: { background: '#e8f3ec', color: BRAND_COLOR },
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -207,10 +224,11 @@ function createCard(
   const chart = Highcharts.chart(chartDiv, options);
   charts[name] = chart;
 
+  // Handlers read `charts[name]`: a card may re-create its chart (the branded one does).
   actions.append(
     button('Export to Excel', `export-${name}`, async () => {
       try {
-        const result = await downloadHighchartsAsXlsx(chart, {
+        const result = await downloadHighchartsAsXlsx(charts[name] ?? chart, {
           filename: `${name}.xlsx`,
           onWarning: (d) => console.debug(`[demo] ${name}: ${d.code} — ${d.property} — ${d.message}`),
         });
@@ -221,7 +239,7 @@ function createCard(
     }),
     button('Analyze', `analyze-${name}`, () => {
       try {
-        const report = analyzeChartCompatibility(chart);
+        const report = analyzeChartCompatibility(charts[name] ?? chart);
         showResult(name, { kind: 'analysis', warnings: report.warnings, report });
       } catch (error) {
         showError(name, error);
@@ -247,8 +265,34 @@ const dynamicButtons = (chart: Chart): HTMLButtonElement[] => [
   }),
 ];
 
+/** Re-creates a card's chart in place (new charts pick up the current global options, e.g. lang). */
+function recreateChart(name: string, options: Options): Chart {
+  const container = document.getElementById(`chart-${name}`)!;
+  charts[name]?.destroy();
+  const chart = Highcharts.chart(container, options);
+  charts[name] = chart;
+  return chart;
+}
+
+/** Language toggle: the menu text is `lang.downloadEditableXLSX`, translated like any Highcharts text. */
+const brandedButtons = (options: Options) => (): HTMLButtonElement[] => [
+  button('Deutsch', 'lang-de', () => {
+    Highcharts.setOptions({ lang: { downloadEditableXLSX: GERMAN_MENU_TEXT } });
+    recreateChart('branded', options);
+  }),
+  button('English', 'lang-en', () => {
+    Highcharts.setOptions({ lang: { downloadEditableXLSX: 'Download editable Excel chart' } });
+    recreateChart('branded', options);
+  }),
+];
+
+const extraButtonsFor: Record<string, (def: DemoChart) => ((chart: Chart) => HTMLButtonElement[]) | undefined> = {
+  dynamic: () => dynamicButtons,
+  branded: (def) => brandedButtons(def.options),
+};
+
 for (const def of demoCharts as DemoChart[]) {
-  createCard(def.name, def.title, def.options, def.note, def.name === 'dynamic' ? dynamicButtons : undefined);
+  createCard(def.name, def.title, def.options, def.note, extraButtonsFor[def.name]?.(def));
 }
 
 // ---------------------------------------------------------------------------------------------

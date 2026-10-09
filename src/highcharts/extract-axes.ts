@@ -7,7 +7,7 @@ import type { AxisKind, AxisModel, Stroke, TextBlock } from '../types/chart-mode
 import { translateFormatString } from '../translators/number-format-translator';
 import { strokeFromOptions } from '../translators/style-translator';
 import { parseColor } from '../utils/colors';
-import { fontFor, borderStroke } from './extract-styles';
+import { fontFor, borderStroke, langSeparators } from './extract-styles';
 import { arr, num, plainText, rec, str } from './guards';
 import type { AxisView, ChartView, ExtractContext, HcAxisLike } from './types';
 
@@ -89,6 +89,7 @@ function extractAxis(ctx: ExtractContext, axis: AxisView): AxisModel {
     kind: 'axisLabel',
     axisType: kind,
     property: `${axis.path}.labels`,
+    ...langSeparators(view),
   });
   diagnostics.addAll(translated.diagnostics);
 

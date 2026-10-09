@@ -6,12 +6,8 @@
 import Highcharts from 'highcharts';
 import 'highcharts/modules/exporting';
 import {
-  DiagnosticCollector,
   ExportError,
-  extractChartModel,
-  translateChartModel,
   analyzeChartCompatibility,
-  createDefaultExcelWriter,
   downloadHighchartsAsXlsx,
   exportChartsToWorkbook,
   exportHighchartsOptionsToXlsx,
@@ -23,17 +19,17 @@ import {
   type ExcelWriter,
   type ExportOptions,
   type ExportResult,
-  type PerChartExportConfig,
-  type WorkbookSpec,
 } from 'highcharts-editable-excel';
-
+// Experimental lower-level pipeline: may change in minor versions (pin an exact version).
+import {
+  DiagnosticCollector,
+  createDefaultExcelWriter,
+  extractChartModel,
+  translateChartModel,
+  type WorkbookSpec,
+} from 'highcharts-editable-excel/internals';
 // Optional: let TypeScript accept `exporting.editableExcel` in Highcharts options.
-// (The library does not ship this augmentation; add it once in your app.)
-declare module 'highcharts' {
-  interface ExportingOptions {
-    editableExcel?: PerChartExportConfig;
-  }
-}
+import 'highcharts-editable-excel/augment';
 
 // --- Quick start: menu integration --------------------------------------------------------------
 installHighchartsExcelExport(Highcharts);

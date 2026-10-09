@@ -127,6 +127,11 @@ export type SeriesKind =
   | 'doughnut'
   | 'scatter'
   | 'bubble'
+  /** Highcharts `errorbar`: drawn as Excel error bars on its parent series (`linkedTo`). */
+  | 'errorbar'
+  /** Range series (points carry `low`/`high`): floating stacked columns / areas in Excel. */
+  | 'columnrange'
+  | 'arearange'
   | 'unknown';
 
 export type Stacking = 'normal' | 'percent' | null;
@@ -151,6 +156,9 @@ export interface PointModel {
   dataLabels: Partial<DataLabelStyle> | null;
   /** Point is selected/hidden in the source (pie legend toggles). */
   visible: boolean;
+  /** Range ends (`errorbar`, `columnrange`, `arearange`); absent or null elsewhere. */
+  low?: number | null;
+  high?: number | null;
 }
 
 export interface SeriesModel {
@@ -191,6 +199,11 @@ export interface SeriesModel {
   yFormat: NumberFormat | null;
   points: PointModel[];
   dataSemantics: SeriesDataSemantics;
+  /**
+   * `id` of the series this one is linked to (Highcharts `linkedTo`, `':previous'` resolved).
+   * Error bars are drawn on that parent. Absent or null when not linked.
+   */
+  linkedTo?: string | null;
 }
 
 export interface SeriesDataSemantics {
@@ -278,7 +291,7 @@ export interface PlotAreaModel {
 }
 
 export interface ChartMeta {
-  sourceLibrary: 'highcharts';
+  sourceLibrary: 'highcharts' | 'chartjs';
   sourceVersion: string | null;
   /**
    * Offset, in minutes, that was ADDED to every datetime x value so that Excel shows the same

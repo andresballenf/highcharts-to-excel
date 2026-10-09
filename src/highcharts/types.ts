@@ -23,6 +23,9 @@ export interface HcPointLike {
   x?: number | null;
   y?: number | null;
   z?: number | null;
+  /** Range points (errorbar, columnrange, arearange). */
+  low?: number | null;
+  high?: number | null;
   name?: string | null;
   index?: number;
   isNull?: boolean;
@@ -83,6 +86,8 @@ export interface HcSeriesLike {
   boosted?: boolean;
   /** Present on navigator series (Highcharts Stock). */
   baseSeries?: unknown;
+  /** The series this one is linked to (`linkedTo`), e.g. the parent of an errorbar series. */
+  linkedParent?: HcSeriesLike | null;
   /** Pie geometry in px: [centerX, centerY, diameter, innerDiameter]. */
   center?: Array<number | null | undefined>;
   closestPointRangePx?: number | null;
@@ -180,6 +185,8 @@ export interface ChartView {
   inverted: boolean;
   polar: boolean;
   resolver: CssVariableResolver;
+  /** Explicit CSS custom property values (`ThemeOverrides.cssVariables`); the resolver consults them first. */
+  cssVariables?: Readonly<Record<string, string>>;
   palette: Color[];
   baseFont: Font;
   xAxes: AxisView[];

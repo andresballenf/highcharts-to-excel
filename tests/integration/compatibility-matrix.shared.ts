@@ -79,12 +79,30 @@ export const EXPECTED_COMPATIBILITY: Readonly<Record<string, ExpectedCompat>> = 
   customStyling: { sourceChartType: 'column', excelChartType: 'column', editable: true },
   bubbleChart: { sourceChartType: 'bubble', excelChartType: 'bubble', editable: true },
   unsupportedType: {
-    sourceChartType: 'columnrange',
+    sourceChartType: 'boxplot',
     excelChartType: null,
     editable: false,
-    requiredCodes: ['UNSUPPORTED_CHART_TYPE'],
+    requiredCodes: ['UNSUPPORTED_SERIES_TYPE', 'UNSUPPORTED_CHART_TYPE'],
   },
-  polarChart: { sourceChartType: 'line', excelChartType: null, editable: false, requiredCodes: ['UNSUPPORTED_POLAR'] },
+  columnRangeChart: {
+    sourceChartType: 'columnrange',
+    excelChartType: 'stackedColumn',
+    editable: true,
+    requiredCodes: ['APPROXIMATED_CHART_TYPE'],
+  },
+  errorBarChart: { sourceChartType: 'column', excelChartType: 'column', editable: true },
+  polarChart: {
+    sourceChartType: 'line',
+    excelChartType: 'radar',
+    editable: true,
+    requiredCodes: ['APPROXIMATED_CHART_TYPE'],
+  },
+  polarColumnChart: {
+    sourceChartType: 'column',
+    excelChartType: null,
+    editable: false,
+    requiredCodes: ['UNSUPPORTED_POLAR'],
+  },
   emptyChart: { sourceChartType: 'line', excelChartType: null, editable: false, requiredCodes: ['EMPTY_CHART'] },
   largeChart: { sourceChartType: 'line', excelChartType: 'line', editable: true },
 };

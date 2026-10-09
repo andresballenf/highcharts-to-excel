@@ -131,6 +131,7 @@ const VALID_POSITIONS: Record<PlotGroupSpec['kind'] | 'barStacked', ReadonlySet<
   pie: new Set(['ctr', 'inEnd', 'outEnd', 'bestFit']),
   area: new Set(),
   doughnut: new Set(),
+  radar: new Set(),
 };
 
 const POSITION_MAP: Readonly<Record<DataLabelStyle['position'], ExcelDataLabelPosition | null>> = {
@@ -162,7 +163,7 @@ export function toExcelDataLabels(
   const extra = seriesIndex !== undefined ? { seriesIndex } : {};
   let position: ExcelDataLabelPosition | null = null;
   const requested = dl.position ?? 'auto';
-  if (groupKind !== 'area' && groupKind !== 'doughnut') {
+  if (groupKind !== 'area' && groupKind !== 'doughnut' && groupKind !== 'radar') {
     position = POSITION_MAP[requested] ?? null;
     if (position === 'outEnd' && groupKind === 'bar' && isStacked) {
       position = 'inEnd';
@@ -195,7 +196,7 @@ export function toExcelDataLabels(
         'APPROXIMATED_DATA_LABELS',
         'approximated',
         `${property}.position`,
-        'Excel does not allow positioning labels on area/doughnut charts; the default position is used.',
+        'Excel does not allow positioning labels on area/doughnut/radar charts; the default position is used.',
         {
           ...extra,
           severity: 'info',
