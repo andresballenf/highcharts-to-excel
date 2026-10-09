@@ -9,3 +9,4 @@ tests/output/
 e2e/output/
 *.tsbuildinfo
 .DS_Store
+tests/unit/_audit_*/
