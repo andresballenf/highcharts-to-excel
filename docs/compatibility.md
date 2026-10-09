@@ -80,7 +80,7 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | `chart.plotBackgroundColor`, `plotBorderColor`/`plotBorderWidth` | native | `UNRESOLVED_COLOR` if unparseable | |
 | `chart.styledMode` | approximated | `STYLED_MODE_FALLBACK` | Real browser: computed SVG colors. Headless: palette by `colorIndex`; background white. |
 | `title.text`, `title.style` | native | none | Also written to cell A1 of the chart sheet. |
-| `subtitle.text` | approximated | `APPROXIMATED_LAYOUT` *(info)* | Second title line, in the title font; used as the title when there is none. |
+| `subtitle.text`, `subtitle.style` | approximated | `APPROXIMATED_LAYOUT` *(info)* | Second title paragraph in its own font (size, weight and color from the subtitle style). Used as the title when there is none. LibreOffice draws the whole title in the first paragraph's style; Excel honours per-paragraph fonts. |
 | `annotations` | unsupported | `UNSUPPORTED_ANNOTATION` | |
 | `tooltip.formatter`, `tooltip.pointFormatter`, `series[i].tooltip.*Formatter` | unsupported | `UNSUPPORTED_TOOLTIP` *(info)* | Tooltips are never exported. |
 | `tooltip.valueDecimals`, `valuePrefix`, `valueSuffix` | native | `UNSUPPORTED_NUMBER_FORMAT` / `APPROXIMATED_NUMBER_FORMAT` when not representable | Become the number format of the series' data cells. |
@@ -180,7 +180,7 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | empty series | translated | `EMPTY_SERIES` *(info)* | |
 | no series or no data | blocking | `EMPTY_CHART` | |
 | more than 1,048,576 rows / 16,384 columns | blocking | `ROW_LIMIT_EXCEEDED` / `COLUMN_LIMIT_EXCEEDED` | |
-| more than 32,000 points in one series | approximated, then writer failure | `ROW_LIMIT_EXCEEDED` | The writer currently refuses the chart part, so the export throws `WRITER_FAILURE`. |
+| more than 32,000 points in one series | approximated (non-blocking) | `ROW_LIMIT_EXCEEDED` | Exported anyway. 32,000 was the Excel 2007 per-series cap; Excel 2010+ is memory-bound. Older Excel versions may truncate the series or render it slowly. |
 | text starting with `= + - @`, tab or CR | translated | `FORMULA_LIKE_TEXT_ESCAPED` *(info)* | Written as inline string text; reported once. |
 | invalid or duplicate sheet names | approximated | `SHEET_NAME_ADJUSTED` *(info)* | |
 | `includeReferenceImage` unavailable | unsupported | `WRITER_LIMITATION` | Export continues without the image (info on the options-only path). |

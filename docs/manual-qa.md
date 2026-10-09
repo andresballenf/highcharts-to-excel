@@ -48,7 +48,7 @@ Open a chart's context menu (☰), choose **Download editable Excel chart**, and
    - series colors, line widths, dash styles, markers
    - series order and names, and stacking
    - axes: type (category/date/value/log), min/max, reversed/opposite, number formats, label rotation
-   - titles: chart title (with the subtitle as the second line), axis titles
+   - titles: chart title, with the subtitle as a second paragraph in its own (smaller, lighter) font, and axis titles
    - fonts: family, size, bold
    - legend position and entries
    - gridlines (major/minor, color)
@@ -78,4 +78,4 @@ Use ✅ / ❌ and put details in the notes column. File an issue for every ❌ w
 
 ## 4. LibreOffice renders are only a smoke check
 
-`tests/integration/render-libreoffice.test.ts` converts workbooks to PDF and PNG in `tests/output/render/` when `soffice`, `pdftoppm` and `pdftotext` are on the PATH. `tests/integration/writer-render.test.ts` does the same in `tests/output/writer/all-charts.pdf`. These renders show that the chart parts parse and draw. LibreOffice's chart engine is not Excel's, though: fonts, label placement, axis crossing and repair behaviour differ. A good LibreOffice render is **not** evidence that Excel accepts the file. Only the checklist above is.
+`tests/integration/render-libreoffice.test.ts` converts workbooks to PDF and PNG in `tests/output/render/` when `soffice`, `pdftoppm` and `pdftotext` are on the PATH. `tests/integration/writer-render.test.ts` does the same in `tests/output/writer/all-charts.pdf`. These renders show that the chart parts parse and draw. LibreOffice's chart engine is not Excel's, though: fonts, label placement, axis crossing and repair behaviour differ. For example, LibreOffice draws a rich chart title entirely in its first paragraph's style, so the subtitle line appears in the title font there. Excel honours the per-paragraph fonts, and that is what the checklist must confirm. A good LibreOffice render is **not** evidence that Excel accepts the file. Only the checklist above is.

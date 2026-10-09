@@ -18,7 +18,7 @@ PW_CHROMIUM_EXECUTABLE=/path/to/chrome pnpm test:e2e   # sandbox: use the preins
 pnpm demo                              # Vite demo; aliases the package to src/ (no build needed)
 pnpm bench                             # tests/integration/bench.test.ts with BENCH=1 → tests/output/bench.json
 pnpm pack-check                        # pack, install in a temp dir, verify exports, Highcharts not bundled
-npx tsc -p examples/tsconfig.json      # typecheck examples/ (shims in examples/shims.d.ts)
+pnpm examples:typecheck                # tsc -p examples/tsconfig.json (shims in examples/shims.d.ts)
 ```
 
 CI (`.github/workflows/ci.yml`) runs typecheck, build, test, test:e2e and pack-check on Node 22, and uploads the generated workbooks.
@@ -42,7 +42,7 @@ chart | options → extract (src/highcharts) → ChartModel IR (src/types/chart-
 
 ## Diagnostics
 
-Codes, outcomes and severities live in `src/types/diagnostics.ts` (`DiagnosticCode`, `buildCompatibilityReport`, the `dataConcerns` set). Raise them with `createDiagnostic`/`DiagnosticCollector.report`. The collector dedupes on code + property + series. Blocking diagnostics always become `CHART_NOT_EDITABLE`. Error codes are in `src/types/public-api.ts`. New codes need a README and `docs/compatibility.md` entry.
+Codes, outcomes and severities live in `src/types/diagnostics.ts` (`DiagnosticCode`, `buildCompatibilityReport`, the `dataConcerns` set). Raise them with `createDiagnostic`/`DiagnosticCollector.report` (both public exports, together with `buildCompatibilityReport`). `APPROXIMATED_COLOR`, `APPROXIMATED_FONT_SIZE` and `APPROXIMATED_DASH_STYLE` are reserved (declared, not raised). The collector dedupes on code + property + series. Blocking diagnostics always become `CHART_NOT_EDITABLE`. Error codes are in `src/types/public-api.ts`. New codes need a README and `docs/compatibility.md` entry.
 
 ## Highcharts versions in tests
 
@@ -54,7 +54,7 @@ Codes, outcomes and severities live in `src/types/diagnostics.ts` (`DiagnosticCo
 
 ## Writer decision
 
-`@office-kit/xlsx` 0.24.1 was evaluated and rejected as the writer: no combo charts or secondary axes, a broken date axis, nulls cached as the text `"null"`, and out-of-order `logBase`. The library ships its own narrowly scoped OOXML writer on `fflate` behind `ExcelWriter`. office-kit is a **dev-only** round-trip validator (`tests/integration/writer-render.test.ts`). Do not add runtime dependencies.
+`@office-kit/xlsx` 0.24.1 was evaluated and rejected as the writer: no combo charts or secondary axes, a broken date axis, nulls cached as the text `"null"`, and out-of-order `logBase`. The library ships its own narrowly scoped OOXML writer on `fflate` behind `ExcelWriter` (users can pass their own via `ExportOptions.writer`). office-kit is a **dev-only** round-trip validator (`tests/integration/writer-render.test.ts`). Do not add runtime dependencies.
 
 ## Validation caveat
 

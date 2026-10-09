@@ -15,7 +15,7 @@ The framework wrappers (`highcharts-react-official`, `highcharts-angular`, `high
 ## Typechecking in this repository
 
 ```bash
-npx tsc -p examples/tsconfig.json
+pnpm examples:typecheck
 ```
 
 `examples/tsconfig.json` maps `highcharts-editable-excel` to `../src/index.ts`, so the examples are checked against the current source. React, Angular and the wrapper packages are not installed here, so `examples/shims.d.ts` declares the few symbols the examples use. Delete it in a real app. The `.vue` file and the HTML page are not typechecked.

@@ -112,7 +112,7 @@ The wrapper packages below (`highcharts-react-official`, `highcharts-angular`, `
 
 The bare specifier needs a bundler or an import map. The example file imports `../../dist/index.js` instead.
 
-**TypeScript**: [`examples/typescript/main.ts`](examples/typescript/main.ts). This file is typechecked in this repository (`npx tsc -p examples/tsconfig.json`) and contains every plain-TypeScript snippet in this README. The React and Angular snippets below are shortened from their example files, which are typechecked too. The `.vue` file is not.
+**TypeScript**: [`examples/typescript/main.ts`](examples/typescript/main.ts). This file is typechecked in this repository (`pnpm examples:typecheck`) and contains every plain-TypeScript snippet in this README. The React and Angular snippets below are shortened from their example files, which are typechecked too. The `.vue` file is not.
 
 ```ts
 import Highcharts from 'highcharts';
@@ -210,7 +210,7 @@ Every function is a named export of `highcharts-editable-excel`. Charts are type
 | `triggerDownload(bytes: Uint8Array, filename: string, mimeType = XLSX_MIME_TYPE)` | `void` | `BROWSER_REQUIRED` if `document`, `Blob` or `URL.createObjectURL` is missing |
 | `analyzeChartCompatibility(chart: unknown, options?: ExportOptions)` | `CompatibilityReport` (synchronous) | `INVALID_CHART` only; a blocked chart returns `editable: false` |
 | `exportHighchartsOptionsToXlsx(highchartsOptions: object, options?: ExportOptions)` | `Promise<ExportResult>` | `INVALID_OPTIONS` (not an object), `CHART_NOT_EDITABLE`, `WRITER_FAILURE` |
-| `exportChartsToWorkbook(entries: MultiChartExportEntry[], options?: { filename?: string; properties?: { title?: string; creator?: string }; strictMode?: boolean })` | `Promise<MultiChartExportResult>` | `INVALID_OPTIONS` (empty or non-array input, non-object entry), `INVALID_CHART` and `CHART_NOT_EDITABLE` (the message names the entry index), `WRITER_FAILURE` |
+| `exportChartsToWorkbook(entries: MultiChartExportEntry[], options?: { filename?: string; properties?: { title?: string; creator?: string }; strictMode?: boolean; writer?: ExcelWriter })` | `Promise<MultiChartExportResult>` | `INVALID_OPTIONS` (empty or non-array input, non-object entry), `INVALID_CHART` and `CHART_NOT_EDITABLE` (the message names the entry index), `WRITER_FAILURE` |
 
 Notes:
 
@@ -219,7 +219,7 @@ Notes:
 - `analyzeChartCompatibility` runs the same extraction and translation as an export but writes nothing and never renders the reference image.
 - `exportChartsToWorkbook` names the sheets `Chart 1`/`Data 1`, `Chart 2`/`Data 2` and so on unless an entry sets `chartSheetName`/`dataSheetName`. Names that collide are de-duplicated with ` (2)`, ` (3)` and reported as `SHEET_NAME_ADJUSTED`. The default filename is `charts.xlsx`. The workbook title comes from the first chart.
 
-Lower-level building blocks are also exported: `CHART_TYPE_MATRIX`, `resolveChartType(model)`, `translateChartModel(model, options)`, `extractChartModel(chart, options)`, `extractChartModelFromOptions(options, extractOptions)`, `createDefaultExcelWriter()`, and the types `ChartModel`, `WorkbookSpec`, `ExcelWriter` and related. See [Custom writer](#custom-writer-excelwriter) for the current limits.
+Lower-level building blocks are also exported: `CHART_TYPE_MATRIX`, `resolveChartType(model)`, `translateChartModel(model, options)`, `extractChartModel(chart, options)`, `extractChartModelFromOptions(options, extractOptions)`, `createDefaultExcelWriter()`, `DiagnosticCollector`, `createDiagnostic`, `buildCompatibilityReport`, and the types `ChartModel`, `WorkbookSpec`, `ExcelWriter` and related. See [Custom writer and pipeline](#custom-writer-and-pipeline).
 
 Constants: `XLSX_MIME_TYPE`, `DEFAULT_MENU_TEXT` (`"Download editable Excel chart"`), `DEFAULT_MENU_ITEM_KEY` (`"downloadEditableXLSX"`).
 
@@ -242,6 +242,7 @@ Constants: `XLSX_MIME_TYPE`, `DEFAULT_MENU_TEXT` (`"Download editable Excel char
 | `includeModel` | `boolean` | `false` | Adds the normalized `ChartModel` to `result.model` (debugging). |
 | `hooks` | `{ transformModel?: (model: ChartModel) => ChartModel }` | none | Called after extraction, before theme overrides and translation. Must return a model with a `series` array (otherwise `INVALID_OPTIONS`). Never mutate the Highcharts chart in it. |
 | `properties` | `{ title?: string; creator?: string }` | Title is the chart title. Creator is `"highcharts-editable-excel"`. | Workbook document properties. |
+| `writer` | `ExcelWriter` | Built-in OOXML writer | Custom writer that receives the `WorkbookSpec` and returns the bytes. For advanced use; see [Custom writer and pipeline](#custom-writer-and-pipeline). |
 
 ### `ThemeOverrides`
 
@@ -348,8 +349,9 @@ interface Diagnostic {
 | `CHART_NOT_EDITABLE` | Any **blocking** diagnostic: polar chart, no series or no data, only unsupported series types, pie or bubble combined with other types, or worksheet row or column limit exceeded. In strict mode, also any `unsupported` warning. `details.diagnostics` lists the causes. |
 | `EXPORTING_MODULE_MISSING` | `installHighchartsExcelExport` was called before `highcharts/modules/exporting` was loaded. |
 | `BROWSER_REQUIRED` | `triggerDownload` or `downloadHighchartsAsXlsx` ran outside a browser. |
-| `WRITER_FAILURE` | The XLSX writer refused the workbook, for example a chart series with more than 32,000 points or a plot group with more than 255 series. `details.cause` holds the original error. |
-| `UNSUPPORTED_CHART_TYPE`, `ROW_LIMIT_EXCEEDED`, `COLUMN_LIMIT_EXCEEDED` | Reserved in the `ExportErrorCode` type but not thrown today. These conditions surface as **diagnostic** codes inside a `CHART_NOT_EDITABLE` error. |
+| `WRITER_FAILURE` | The writer (built-in or `options.writer`) threw. For example, the built-in writer refuses a plot group with more than 255 series. `details.cause` holds the original error. |
+
+Unsupported chart types and worksheet row or column overflows are not error codes of their own. They arrive as diagnostic codes (`UNSUPPORTED_CHART_TYPE`, `ROW_LIMIT_EXCEEDED`, `COLUMN_LIMIT_EXCEEDED`) in `details.diagnostics` of a `CHART_NOT_EDITABLE` error.
 
 ## Compatibility matrix
 
@@ -443,7 +445,7 @@ Per-option detail (option path, outcome, diagnostic) is in [docs/compatibility.m
 Excel's chart engine is not Highcharts. Expect these differences:
 
 - **Fonts.** The first usable family of the CSS stack is used. The Highcharts default stack maps to `Segoe UI`. Generic families map to `Arial`, `Times New Roman` and so on (`APPROXIMATED_FONT`). Excel substitutes fonts that are not installed. Sizes convert at 1 px = 0.75 pt.
-- **One title.** Excel charts have no subtitle, so the subtitle is merged into the title as a second line, in the title font.
+- **One title.** Excel charts have no subtitle, so the subtitle is merged into the title as a second paragraph in its own font (size, weight and color from the subtitle style). Excel honours per-paragraph fonts. LibreOffice draws the whole rich title in the first paragraph's style.
 - **No rounded bars, no zones, no negative colors.**
 - **Data-label positions are restricted per chart type:**
   - clustered bars: center, inside end, inside base, outside end
@@ -513,7 +515,7 @@ Switch on `diagnostic.code`; the codes are stable. They are grouped as follows:
 - not representable: `UNSUPPORTED_TOOLTIP`, `UNSUPPORTED_ANNOTATION`, `UNSUPPORTED_PLOT_BAND`
 - integration: `FORMULA_LIKE_TEXT_ESCAPED`, `SHEET_NAME_ADJUSTED`, `WRITER_LIMITATION`
 
-The `DiagnosticCode` type also declares `UNSUPPORTED_AXIS_TYPE`, `APPROXIMATED_COLOR`, `APPROXIMATED_FONT_SIZE`, `APPROXIMATED_DASH_STYLE`, `UNSUPPORTED_INTERACTIVITY`, `EXPORTING_MODULE_MISSING` and `HEADLESS_STYLE_FALLBACK`. They are reserved: no code path raises them as a diagnostic today. A missing exporting module is reported as an `ExportError`.
+The `DiagnosticCode` type also declares `APPROXIMATED_COLOR`, `APPROXIMATED_FONT_SIZE` and `APPROXIMATED_DASH_STYLE`. These are **reserved**: no code path raises them today. A missing exporting module is reported as an `ExportError` (`EXPORTING_MODULE_MISSING`), not as a diagnostic.
 
 ### Strict mode
 
@@ -562,11 +564,47 @@ triggerDownload(result.bytes, result.filename, result.mimeType);
 
 `includeReferenceImage: true` renders `chart.getSVG()` to a PNG at 2x through a `<canvas>`. The PNG goes on the chart sheet to the right of the native chart. It is meant for comparing the two renderings and is off by default.
 
-### Custom writer (`ExcelWriter`)
+### Custom writer and pipeline
 
-The `ExcelWriter` interface (`{ name: string; write(workbook: WorkbookSpec): Promise<Uint8Array> }`) and the `WorkbookSpec` types are exported for advanced users. `createDefaultExcelWriter()` returns the built-in OOXML writer, and you can call it with a `WorkbookSpec` you build yourself (see `writeCustomWorkbook` in the TypeScript example).
+The `ExcelWriter` interface is `{ name: string; write(workbook: WorkbookSpec): Promise<Uint8Array> }`. Pass an implementation as `options.writer` to `exportHighchartsToXlsx`, `downloadHighchartsAsXlsx`, `exportHighchartsOptionsToXlsx` or `exportChartsToWorkbook`. `createDefaultExcelWriter()` returns the built-in OOXML writer, so a custom writer can wrap it:
 
-The high-level export functions always use the built-in writer: there is currently **no option to inject another writer**. `extractChartModel` and `translateChartModel` are exported, but their options require a `DiagnosticCollector` instance that is not exported. Treat them as internal for now.
+```ts
+const loggingWriter: ExcelWriter = {
+  name: 'logging-default',
+  async write(workbook) {
+    console.log('writing sheets', workbook.sheets.map((s) => s.name));
+    return createDefaultExcelWriter().write(workbook);
+  },
+};
+const { bytes } = await exportHighchartsToXlsx(sales, { writer: loggingWriter });
+```
+
+For full control, run the three pipeline steps yourself with the exported `DiagnosticCollector`:
+
+1. `extractChartModel` produces the `ChartModel`.
+2. `translateChartModel` produces the sheets.
+3. Any `ExcelWriter` writes them.
+
+Unlike the high-level functions, this path does not throw on blocking diagnostics, so check `translation.blocking` yourself:
+
+```ts
+const diagnostics = new DiagnosticCollector((d) => console.info(d.code, d.property));
+// 1. Extract the neutral ChartModel.
+const model = extractChartModel(chart, { dataMode: 'rendered', seriesVisibility: 'visible', diagnostics });
+// 2. Translate it into worksheet specs with a native chart.
+const translation = translateChartModel(model, {
+  chartSheetName: 'Chart',
+  dataSheetName: 'Data',
+  includeSourceData: true,
+  fidelity: 'best-effort',
+  diagnostics,
+});
+if (translation.blocking) throw new Error(`Not editable: ${diagnostics.items.map((d) => d.code).join(', ')}`);
+// 3. Write the WorkbookSpec with any ExcelWriter.
+return loggingWriter.write({ properties: { title: 'Manual' }, sheets: translation.sheets });
+```
+
+`buildCompatibilityReport` and `createDiagnostic` are exported too, so you can build a report or raise your own diagnostics in `hooks.transformModel`.
 
 ## Security and privacy
 
@@ -576,7 +614,7 @@ The high-level export functions always use the built-in writer: there is current
 - **XML safety.** All text and attributes are XML-escaped. Characters not allowed in XML 1.0 are stripped. Cell text is cut at Excel's 32,767-character limit.
 - **Excel limits.**
   - More than 1,048,576 rows or 16,384 columns blocks the export (`ROW_LIMIT_EXCEEDED` / `COLUMN_LIMIT_EXCEEDED` inside `CHART_NOT_EDITABLE`).
-  - Excel allows at most 32,000 points per chart series. A longer series is reported as `ROW_LIMIT_EXCEEDED` (approximated), but the writer then refuses it, so the export fails with `WRITER_FAILURE`. To stay under the limit, export grouped data (Highcharts Stock, `dataMode: 'rendered'`) or reduce the points first.
+  - Excel 2007 capped chart series at 32,000 points. Excel 2010 and later are limited by memory only. A longer series is still exported, with a non-blocking `ROW_LIMIT_EXCEEDED` warning (outcome `approximated`), because older Excel versions may truncate it or render it slowly. To stay under the guidance, export grouped data (Highcharts Stock, `dataMode: 'rendered'`) or reduce the points first.
 
 ## Troubleshooting
 
@@ -588,7 +626,7 @@ The high-level export functions always use the built-in writer: there is current
 | Nothing downloads / `BROWSER_REQUIRED` | `downloadHighchartsAsXlsx` needs `document` and `URL.createObjectURL`. In Node or a worker, use `exportHighchartsToXlsx` or `exportHighchartsOptionsToXlsx` and handle `bytes` yourself. Browsers can also block downloads that are not triggered by a user gesture, or in sandboxed iframes without `allow-downloads`. Trigger the export from a click. |
 | Wrong colors in styled mode on the server | CSS is not readable without a real browser (`STYLED_MODE_FALLBACK`). Pass `themeOverrides.colors` (and backgrounds or fonts). |
 | Dates shifted by some hours | Timestamps are written as UTC serials. `chart.time` time-zone settings are not applied to the cells. Export timestamps at UTC midnight for whole days, or adjust the data before exporting. |
-| Large charts are slow | All points are written to the sheet and to the chart cache. Use `dataMode: 'rendered'` with data grouping, or fewer points. `result.timings` shows where the time goes. For measurements, see `pnpm bench`. |
+| Large charts are slow | All points are written to the sheet and to the chart cache. Use `dataMode: 'rendered'` with data grouping, or fewer points. `result.timings` shows where the time goes. For measurements, run `pnpm bench`; it prints a table and writes `tests/output/bench.json`. |
 | Vite / CJS errors importing Highcharts modules | Highcharts ships UMD/CJS files without an exports map. Import modules as side effects (`import 'highcharts/modules/exporting'`, not as factories). With Vite, list them in `optimizeDeps.include`, as `demo/vite.config.ts` does. |
 
 ## Development
@@ -600,8 +638,9 @@ pnpm build         # tsup → dist/index.js (ESM) + dist/index.d.ts
 pnpm test          # vitest (jsdom): unit + integration, writes tests/output/**
 pnpm test:e2e      # Playwright against the Vite demo (set PW_CHROMIUM_EXECUTABLE to use a preinstalled Chromium)
 pnpm demo          # Vite demo on http://127.0.0.1:4173
-pnpm bench         # export timing benchmark
+pnpm bench         # export timing benchmark (prints a table, writes tests/output/bench.json)
 pnpm pack-check    # pack, install the tarball in a temp project, verify exports and that Highcharts is not bundled
+pnpm examples:typecheck  # tsc -p examples/tsconfig.json (examples against src/)
 ```
 
 Repository layout:
