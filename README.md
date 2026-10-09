@@ -639,6 +639,7 @@ pnpm test          # vitest (jsdom): unit + integration, writes tests/output/**
 pnpm test:e2e      # Playwright against the Vite demo (set PW_CHROMIUM_EXECUTABLE to use a preinstalled Chromium)
 pnpm demo          # Vite demo on http://127.0.0.1:4173
 pnpm bench         # export timing benchmark (prints a table, writes tests/output/bench.json)
+pnpm coverage      # vitest with v8 coverage (text summary + HTML under tests/output/coverage)
 pnpm pack-check    # pack, install the tarball in a temp project, verify exports and that Highcharts is not bundled
 pnpm examples:typecheck  # tsc -p examples/tsconfig.json (examples against src/)
 ```

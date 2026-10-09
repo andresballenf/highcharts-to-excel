@@ -17,6 +17,7 @@ pnpm test:e2e                          # Playwright vs the Vite demo on :4173
 PW_CHROMIUM_EXECUTABLE=/path/to/chrome pnpm test:e2e   # sandbox: use the preinstalled Chromium
 pnpm demo                              # Vite demo; aliases the package to src/ (no build needed)
 pnpm bench                             # tests/integration/bench.test.ts with BENCH=1 → tests/output/bench.json
+pnpm coverage                          # vitest --coverage (v8) → tests/output/coverage
 pnpm pack-check                        # pack, install in a temp dir, verify exports, Highcharts not bundled
 pnpm examples:typecheck                # tsc -p examples/tsconfig.json (shims in examples/shims.d.ts)
 ```
