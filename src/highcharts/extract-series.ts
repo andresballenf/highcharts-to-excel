@@ -576,8 +576,12 @@ function extractOne(ctx: ExtractContext, s: SeriesView): SeriesModel {
 
   let bars: SeriesModel['bars'] = null;
   if (BAR_KINDS.has(kind)) {
-    const br = o.borderRadius;
-    const radius = num(br) ?? num(get(br, 'radius')) ?? (br === undefined ? 3 : 0);
+    // Highcharts rounds bar corners by 3px by default; only an explicit setting is worth a diagnostic,
+    // so read the user's own options (series, then plotOptions) rather than the merged defaults.
+    const uo = s.userOpts;
+    const plot = get(view.userOpts, 'plotOptions') as Record<string, unknown> | undefined;
+    const br = uo.borderRadius ?? get(plot, s.type, 'borderRadius') ?? get(plot, 'series', 'borderRadius');
+    const radius = num(br) ?? num(get(br, 'radius')) ?? 0;
     bars = { pointPadding: num(o.pointPadding) ?? 0.1, groupPadding: num(o.groupPadding) ?? 0.2, borderRadius: radius };
   }
 
