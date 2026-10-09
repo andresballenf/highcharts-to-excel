@@ -330,7 +330,7 @@ export interface ExcelWriter {
 /** Excel limits (XLSX, Excel 2007+). */
 export const EXCEL_MAX_ROWS = 1_048_576;
 export const EXCEL_MAX_COLUMNS = 16_384;
-/** Excel refuses chart series with more points than this. */
+/** Excel 2007 guidance for points per series; later versions are memory-bound. Exceeding it raises a warning. */
 export const EXCEL_MAX_POINTS_PER_SERIES = 32_000;
 /** Maximum series per chart. */
 export const EXCEL_MAX_SERIES_PER_CHART = 255;

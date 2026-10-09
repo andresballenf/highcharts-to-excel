@@ -16,7 +16,8 @@
     "resolveJsonModule": true,
     "declaration": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": { "highcharts-editable-excel": ["./src/index.ts"] }
   },
   "include": ["src", "tests", "e2e", "demo/src", "scripts", "vitest.config.ts", "tsup.config.ts", "playwright.config.ts", "vite.config.ts"]
 }

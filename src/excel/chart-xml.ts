@@ -5,7 +5,6 @@
  * the chart) when it does not. Absent optional elements are omitted.
  */
 import {
-  EXCEL_MAX_POINTS_PER_SERIES,
   EXCEL_MAX_SERIES_PER_CHART,
   type ExcelAxisSpec,
   type ExcelChartSpec,
@@ -35,10 +34,12 @@ function formulaXml(formula: string, what: string): string {
   return `<c:f>${escapeXml(f)}</c:f>`;
 }
 
+/**
+ * Excel 2007 capped series at 32,000 points; Excel 2010+ is bounded by memory only. The translator
+ * reports ROW_LIMIT_EXCEEDED as a warning above that guidance, so the writer does not refuse here.
+ */
 function checkPointCount(n: number, what: string): void {
-  if (n > EXCEL_MAX_POINTS_PER_SERIES) {
-    throw new Error(`Chart ${what} has ${n} points; Excel allows at most ${EXCEL_MAX_POINTS_PER_SERIES} per series`);
-  }
+  if (!Number.isFinite(n) || n < 0) throw new Error(`Chart ${what} has an invalid point count`);
 }
 
 /** Number for a cache point, or null when the point must be skipped. */
