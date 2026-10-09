@@ -125,13 +125,15 @@ export function txPrXml(font: ExcelFontSpec | null | undefined, rotationDeg: num
 
 /** `<c:tx><c:rich>…` for titles: one a:p per line. */
 export function richTextXml(text: ExcelTextSpec): string {
-  const paras = text.lines.map(
-    (line) =>
+  const paras = text.lines.map((line, i) => {
+    const font = text.lineFonts?.[i] ?? text.font;
+    return (
       '<a:p>' +
-      `<a:pPr>${runPropsXml('a:defRPr', text.font)}</a:pPr>` +
-      `<a:r>${runPropsXml('a:rPr', text.font, ' lang="en-US"')}<a:t>${escapeXml(line)}</a:t></a:r>` +
-      '</a:p>',
-  );
+      `<a:pPr>${runPropsXml('a:defRPr', font)}</a:pPr>` +
+      `<a:r>${runPropsXml('a:rPr', font, ' lang="en-US"')}<a:t>${escapeXml(line)}</a:t></a:r>` +
+      '</a:p>'
+    );
+  });
   return `<c:tx><c:rich><a:bodyPr/><a:lstStyle/>${paras.join('')}</c:rich></c:tx>`;
 }
 

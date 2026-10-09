@@ -116,6 +116,8 @@ export interface ExcelTextSpec {
   /** Lines are joined with line breaks in a single paragraph each. */
   lines: string[];
   font: ExcelFontSpec | null;
+  /** Optional per-line font overrides, index-aligned with `lines`; null/absent entries use `font`. */
+  lineFonts?: Array<ExcelFontSpec | null>;
   overlay: boolean;
 }
 

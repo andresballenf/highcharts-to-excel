@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>highcharts-editable-excel: plain JavaScript</title>
+    <!-- Highcharts and its exporting module from the Highcharts CDN (global `Highcharts`). -->
+    <script src="https://code.highcharts.com/13.1.1/highcharts.js"></script>
+    <script src="https://code.highcharts.com/13.1.1/modules/exporting.js"></script>
+  </head>
+  <body>
+    <div id="container" style="max-width: 800px; height: 400px"></div>
+    <button id="download" type="button">Download editable Excel chart</button>
+
+    <script type="module">
+      // Built bundle of this repository (`pnpm build`). In an app: import from 'highcharts-editable-excel'.
+      import { installHighchartsExcelExport, downloadHighchartsAsXlsx } from '../../dist/index.js';
+
+      installHighchartsExcelExport(window.Highcharts); // adds "Download editable Excel chart" to the menu
+
+      const chart = window.Highcharts.chart('container', {
+        title: { text: 'Fruit consumption' },
+        xAxis: { categories: ['Apples', 'Bananas', 'Oranges'] },
+        yAxis: { title: { text: 'Fruit eaten' } },
+        series: [
+          { type: 'column', name: 'Jane', data: [1, 0, 4] },
+          { type: 'column', name: 'John', data: [5, 7, 3] },
+        ],
+      });
+
+      document.getElementById('download').addEventListener('click', async () => {
+        const result = await downloadHighchartsAsXlsx(chart);
+        console.log('Downloaded', result.filename, 'warnings:', result.warnings);
+      });
+    </script>
+  </body>
+</html>

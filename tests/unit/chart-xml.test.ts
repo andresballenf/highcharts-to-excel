@@ -415,3 +415,22 @@ describe('buildChartXml – edge cases', () => {
     expect(() => buildChartXml(emptyFormula)).toThrow(/empty formula/);
   });
 });
+
+describe('title line fonts', () => {
+  it('applies per-line fonts to merged subtitle lines', async () => {
+    const { richTextXml } = await import('../../src/excel/drawingml-xml');
+    const xml = richTextXml({
+      lines: ['Title', 'Subtitle'],
+      font: { typeface: 'Georgia', sizeHundredthsPt: 1400, bold: true, italic: false, colorHex: '333333' },
+      lineFonts: [null, { typeface: 'Georgia', sizeHundredthsPt: 900, bold: false, italic: false, colorHex: '666666' }],
+      overlay: false,
+    });
+    const paras = xml.split('<a:p>').slice(1);
+    expect(paras).toHaveLength(2);
+    expect(paras[0]).toContain('sz="1400"');
+    expect(paras[0]).toContain('b="1"');
+    expect(paras[1]).toContain('sz="900"');
+    expect(paras[1]).toContain('b="0"');
+    expect(paras[1]).toContain('<a:t>Subtitle</a:t>');
+  });
+});

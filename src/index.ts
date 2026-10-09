@@ -93,3 +93,5 @@ export type {
 export type { ChartTypeMatrixEntry, ChartTypeResolution, PlotGroupPlan } from './core/chart-type-registry';
 export type { TranslateOptions, TranslationResult } from './core/translate-chart';
 export type { ExtractOptions } from './highcharts/extract-chart';
+
+export { DiagnosticCollector, buildCompatibilityReport, createDiagnostic } from './types/diagnostics';

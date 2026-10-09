@@ -234,11 +234,16 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
 
   const fontOf = (font: Parameters<typeof toExcelFont>[0], property: string): ExcelFontSpec | null =>
     best ? toExcelFont(font, property, styleSink) : null;
-  const textSpec = (tb: TextBlock | null, property: string, extraLines: string[] = []): ExcelTextSpec | null => {
+  const textSpec = (tb: TextBlock | null, property: string, extra: { lines: string[]; font: ExcelFontSpec | null } | null = null): ExcelTextSpec | null => {
     if (!tb) return null;
-    const lines = [...textOf(tb), ...extraLines];
+    const own = textOf(tb);
+    const lines = [...own, ...(extra?.lines ?? [])];
     if (lines.length === 0) return null;
-    return { lines, font: fontOf(tb.font, `${property}.style`), overlay: false };
+    const spec: ExcelTextSpec = { lines, font: fontOf(tb.font, `${property}.style`), overlay: false };
+    if (extra && extra.lines.length > 0 && extra.font) {
+      spec.lineFonts = [...own.map(() => null), ...extra.lines.map(() => extra.font)];
+    }
+    return spec;
   };
 
   interface AxisParams {
@@ -869,12 +874,14 @@ export function translateChartModel(model: ChartModel, opts: TranslateOptions): 
   let title: ExcelTextSpec | null = null;
   if (model.title && textOf(model.title).length > 0) {
     const subtitleLines = model.subtitle ? textOf(model.subtitle) : [];
-    title = textSpec(model.title, 'title', subtitleLines);
+    const subtitleFont = model.subtitle && subtitleLines.length > 0 && best ? fontOf(model.subtitle.font, 'subtitle.style') : null;
+    title = textSpec(model.title, 'title', subtitleLines.length > 0 ? { lines: subtitleLines, font: subtitleFont } : null);
     support('title.text');
     if (best) support('title.style');
     if (subtitleLines.length > 0) {
+      support('subtitle.text');
       out.push(
-        createDiagnostic('APPROXIMATED_LAYOUT', 'approximated', 'subtitle.text', 'Excel charts have a single title; the subtitle is merged into the title as a second line with the title font.', {
+        createDiagnostic('APPROXIMATED_LAYOUT', 'approximated', 'subtitle.text', 'Excel charts have a single title; the subtitle is merged into the title as a second line in its own font.', {
           severity: 'info',
         }),
       );

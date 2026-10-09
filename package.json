@@ -48,7 +48,8 @@
     "demo:build": "vite build --config demo/vite.config.ts",
     "bench": "tsx scripts/bench.ts",
     "check": "pnpm typecheck && pnpm build && pnpm test",
-    "pack-check": "tsx scripts/pack-check.ts"
+    "pack-check": "tsx scripts/pack-check.ts",
+    "examples:typecheck": "tsc -p examples/tsconfig.json"
   },
   "peerDependencies": {
     "highcharts": ">=11.0.0"

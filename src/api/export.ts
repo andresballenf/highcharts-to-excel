@@ -19,6 +19,7 @@ import {
 } from '../types/public-api';
 import type { SheetSpec, WorkbookSpec } from '../excel/writer-interface';
 import { createDefaultExcelWriter } from '../excel/ooxml-writer';
+import type { ExcelWriter } from '../excel/writer-interface';
 import { extractChartModel, extractChartModelFromOptions } from '../highcharts/extract-chart';
 import { getHighchartsVersion } from '../highcharts/guards';
 import { applyThemeOverrides } from '../core/theme-overrides';
@@ -149,9 +150,9 @@ function enforceEditable(t: Translated, strictMode: boolean, label: string): voi
   }
 }
 
-async function writeWorkbook(spec: WorkbookSpec): Promise<Uint8Array> {
+async function writeWorkbook(spec: WorkbookSpec, writer?: ExcelWriter): Promise<Uint8Array> {
   try {
-    return await createDefaultExcelWriter().write(spec);
+    return await (writer ?? createDefaultExcelWriter()).write(spec);
   } catch (error) {
     if (error instanceof ExportError) throw error;
     throw new ExportError('WRITER_FAILURE', `Writing the XLSX package failed: ${error instanceof Error ? error.message : String(error)}`, {
@@ -192,7 +193,7 @@ async function runSingle(source: Source, options: ExportOptions | undefined): Pr
       creator: resolved.properties?.creator ?? CREATOR,
     },
     sheets: translated.translation.sheets,
-  });
+  }, resolved.writer);
   const writeMs = elapsed(tWrite);
 
   const result: ExportResult = {
@@ -245,7 +246,7 @@ export function analyzeChartCompatibility(chart: unknown, options?: ExportOption
  */
 export async function exportChartsToWorkbook(
   entries: MultiChartExportEntry[],
-  options: { filename?: string; properties?: ExportOptions['properties']; strictMode?: boolean } = {},
+  options: { filename?: string; properties?: ExportOptions['properties']; strictMode?: boolean; writer?: ExcelWriter } = {},
 ): Promise<MultiChartExportResult> {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new ExportError('INVALID_OPTIONS', 'exportChartsToWorkbook expects a non-empty array of { chart, options } entries.');
@@ -297,6 +298,6 @@ export async function exportChartsToWorkbook(
   const bytes = await writeWorkbook({
     properties: { title: options.properties?.title ?? firstTitle, creator: options.properties?.creator ?? CREATOR },
     sheets,
-  });
+  }, options.writer);
   return { bytes, filename: sanitizeFilename(options.filename ?? 'charts'), mimeType: XLSX_MIME_TYPE, charts };
 }

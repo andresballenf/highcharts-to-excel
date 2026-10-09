@@ -37,7 +37,6 @@ export type DiagnosticCode =
   | 'NULL_VALUES'
   | 'NON_NUMERIC_VALUE'
   // axes
-  | 'UNSUPPORTED_AXIS_TYPE'
   | 'APPROXIMATED_AXIS_SCALE'
   | 'UNSUPPORTED_AXIS_FEATURE'
   | 'MULTIPLE_X_AXES'
@@ -61,12 +60,9 @@ export type DiagnosticCode =
   | 'APPROXIMATED_DATA_LABELS'
   // interactivity (never representable)
   | 'UNSUPPORTED_TOOLTIP'
-  | 'UNSUPPORTED_INTERACTIVITY'
   | 'UNSUPPORTED_ANNOTATION'
   | 'UNSUPPORTED_PLOT_BAND'
   // environment / integration
-  | 'EXPORTING_MODULE_MISSING'
-  | 'HEADLESS_STYLE_FALLBACK'
   | 'FORMULA_LIKE_TEXT_ESCAPED'
   | 'SHEET_NAME_ADJUSTED'
   | 'WRITER_LIMITATION';

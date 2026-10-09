@@ -4,6 +4,7 @@
 
 import type { ChartModel } from './chart-model';
 import type { CompatibilityReport, Diagnostic } from './diagnostics';
+import type { ExcelWriter } from '../excel/writer-interface';
 
 /**
  * How hard the exporter tries to reproduce the source styling.
@@ -91,10 +92,18 @@ export interface ExportOptions {
   chartWidth?: number;
   chartHeight?: number;
   /**
-   * When true, throw ExportError (code CHART_NOT_EDITABLE) instead of producing a workbook whenever
-   * any diagnostic is 'blocking' or the chart type is unsupported. Default false.
+   * Blocking diagnostics (unsupported chart type, polar, empty chart, row limits) always throw
+   * ExportError CHART_NOT_EDITABLE: a degraded or image-based workbook is never produced.
+   * When strictMode is true the export ALSO throws CHART_NOT_EDITABLE when any diagnostic has
+   * outcome 'unsupported' with severity 'warning' or 'error' (a visible fidelity loss), instead of
+   * silently dropping the feature. Default false.
    */
   strictMode?: boolean;
+  /**
+   * Custom Excel writer implementing the `ExcelWriter` interface (see `src/excel/writer-interface.ts`).
+   * Defaults to the built-in OOXML writer. Advanced use only.
+   */
+  writer?: ExcelWriter;
   /**
    * Opt-in: embed a PNG rendering of the source chart on the chart sheet next to the native chart,
    * for side-by-side comparison. Browser only; requires the Highcharts exporting module. Default false.
@@ -176,9 +185,6 @@ export interface Installation {
 export type ExportErrorCode =
   | 'INVALID_CHART'
   | 'CHART_NOT_EDITABLE'
-  | 'UNSUPPORTED_CHART_TYPE'
-  | 'ROW_LIMIT_EXCEEDED'
-  | 'COLUMN_LIMIT_EXCEEDED'
   | 'EXPORTING_MODULE_MISSING'
   | 'BROWSER_REQUIRED'
   | 'WRITER_FAILURE'
