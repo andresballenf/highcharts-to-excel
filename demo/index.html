@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>highcharts-editable-excel demo</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <!--
+      Theme for the styled-mode card (#chart-styled). Highcharts' own styled-mode stylesheet
+      (highcharts/css/highcharts.css) is injected by main.ts, scoped to that card only, so it
+      cannot restyle the other (non-styled) charts. These rules override its defaults; the
+      exporter reads the browser-computed values, so the Excel series get exactly these colors.
+    -->
+    <style id="styled-mode-theme">
+      #chart-styled {
+        --highcharts-color-0: #8e44ad;
+        --highcharts-color-1: #16a085;
+        --highcharts-color-2: #d35400;
+        --highcharts-background-color: #fdf6e3;
+      }
+      #chart-styled .highcharts-background {
+        fill: #fdf6e3;
+      }
+      #chart-styled .highcharts-title {
+        fill: #073642;
+        font-weight: bold;
+      }
+      #chart-styled .highcharts-grid-line {
+        stroke: #d9cfb4;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <h1>highcharts-editable-excel demo</h1>
+        <p class="lede">
+          Every chart below can be downloaded as an <strong>.xlsx</strong> workbook holding a native,
+          editable Excel chart linked to a data sheet. Use the chart's ☰ menu
+          (“Download editable Excel chart”), the <em>Export to Excel</em> button, or
+          <em>Analyze</em> to preview what will be approximated.
+        </p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="primary" data-testid="export-all">Export all charts to one workbook</button>
+        <span class="status" data-testid="export-all-status" aria-live="polite"></span>
+      </div>
+    </header>
+    <main id="gallery" class="gallery" aria-label="Chart gallery"></main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

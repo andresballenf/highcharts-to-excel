@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-demo/
+coverage/
+.vite/
+test-results/
+playwright-report/
+tests/output/
+e2e/output/
+*.tsbuildinfo
+.DS_Store
+tests/unit/_audit_*/
+tools/ooxml-validator/bin/
+tools/ooxml-validator/obj/

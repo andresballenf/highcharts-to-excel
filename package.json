@@ -1,0 +1,151 @@
+{
+  "name": "highcharts-editable-excel",
+  "version": "0.0.0",
+  "description": "Export Highcharts charts to XLSX workbooks containing native, editable Excel charts linked to worksheet data.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      },
+      "default": "./dist/index.js"
+    },
+    "./internals": {
+      "import": {
+        "types": "./dist/internals.d.ts",
+        "default": "./dist/internals.js"
+      },
+      "require": {
+        "types": "./dist/internals.d.cts",
+        "default": "./dist/internals.cjs"
+      },
+      "default": "./dist/internals.js"
+    },
+    "./augment": {
+      "import": {
+        "types": "./dist/augment.d.ts",
+        "default": "./dist/augment.js"
+      },
+      "require": {
+        "types": "./dist/augment.d.cts",
+        "default": "./dist/augment.cjs"
+      },
+      "default": "./dist/augment.js"
+    },
+    "./chartjs": {
+      "import": {
+        "types": "./dist/chartjs.d.ts",
+        "default": "./dist/chartjs.js"
+      },
+      "require": {
+        "types": "./dist/chartjs.d.cts",
+        "default": "./dist/chartjs.cjs"
+      },
+      "default": "./dist/chartjs.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_LICENSES.md"
+  ],
+  "keywords": [
+    "highcharts",
+    "excel",
+    "xlsx",
+    "chart",
+    "export",
+    "ooxml",
+    "editable"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andresballenf/highcharts-to-excel"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "test:visual": "vitest run tests/integration/visual-regression.test.ts",
+    "test:e2e": "playwright test",
+    "demo": "vite --config demo/vite.config.ts",
+    "demo:build": "vite build --config demo/vite.config.ts",
+    "bench": "tsx scripts/bench.ts",
+    "check": "pnpm typecheck && pnpm build && pnpm test",
+    "pack-check": "tsx scripts/pack-check.ts",
+    "validate:xsd": "python3 scripts/validate-ooxml.py tests/output/export/v13/*.xlsx tests/output/writer/*.xlsx",
+    "validate:openxml": "dotnet run --project tools/ooxml-validator -- tests/output/export/v13/*.xlsx tests/output/writer/*.xlsx",
+    "examples:typecheck": "tsc -p examples/tsconfig.json",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm check && changeset publish",
+    "prepublishOnly": "pnpm check && pnpm pack-check"
+  },
+  "peerDependencies": {
+    "chart.js": ">=4.0.0",
+    "highcharts": ">=11.0.0"
+  },
+  "peerDependenciesMeta": {
+    "chart.js": {
+      "optional": true
+    },
+    "highcharts": {
+      "optional": false
+    }
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@biomejs/biome": "2.5.15",
+    "@changesets/cli": "^3.0.3",
+    "@office-kit/xlsx": "0.24.1",
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^26.6.4",
+    "@types/pngjs": "6.0.5",
+    "@vitest/coverage-v8": "^5.0.3",
+    "chart.js": "4.5.1",
+    "fast-xml-parser": "^5.11.2",
+    "fflate": "^0.8.3",
+    "highcharts": "13.1.1",
+    "highcharts11": "npm:highcharts@11.4.9",
+    "highcharts12": "npm:highcharts@12.6.2",
+    "jsdom": "^30.1.2",
+    "pixelmatch": "7.2.0",
+    "pngjs": "7.0.0",
+    "publint": "0.3.25",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

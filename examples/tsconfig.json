@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "experimentalDecorators": true,
+    "paths": {
+      "highcharts-editable-excel": ["../src/index.ts"],
+      "highcharts-editable-excel/internals": ["../src/internals.ts"],
+      "highcharts-editable-excel/augment": ["../src/augment.ts"]
+    }
+  },
+  "include": ["shims.d.ts", "typescript/**/*.ts", "react/**/*.tsx", "angular/**/*.ts"],
+  "exclude": ["vue/**", "javascript/**"]
+}
