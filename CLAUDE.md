@@ -20,7 +20,7 @@ pnpm demo                              # Vite demo; aliases the package to src/ 
 pnpm bench                             # tests/integration/bench.test.ts with BENCH=1 → tests/output/bench.json
 pnpm coverage                          # vitest --coverage (v8) → tests/output/coverage; thresholds lines 90 / functions 92 / branches 78 / statements 87
 REQUIRE_RENDER=1 pnpm test             # LibreOffice/poppler render tests FAIL instead of skipping when the tools are missing (CI)
-pnpm test:visual                       # LibreOffice render visual regression vs tests/baselines/render (pixelmatch ≤1.5%); UPDATE_BASELINES=1 writes/rewrites baselines
+VISUAL_REGRESSION=1 pnpm test:visual   # LibreOffice visual regression vs tests/baselines/render (pixelmatch, ≤0.5% differing pixels); skipped outside CI unless VISUAL_REGRESSION=1 / REQUIRE_RENDER=1 / UPDATE_BASELINES=1 (baselines are CI-image renders); UPDATE_BASELINES=1 writes/rewrites baselines
 pnpm validate:openxml                  # Open XML SDK validator (tools/ooxml-validator, .NET 8) on tests/output/{export/v13,writer}/*.xlsx; run pnpm test first
 pnpm pack-check [--no-build]           # pack, publint + attw, install (+ highcharts) in a temp dir: src/index.ts + src/internals.ts exports (ESM+CJS), no experimental names in main, /augment typechecks; Highcharts not bundled
 pnpm changeset                         # add a changeset to every PR that changes the package; pnpm changeset status to check

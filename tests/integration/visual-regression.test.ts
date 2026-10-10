@@ -18,8 +18,11 @@
  * why the crop stays on the chart area and the data sheet is left out. If the renderer or fonts
  * change on purpose, regenerate the baselines on that image.
  *
- * Skips with a printed reason when soffice/pdftoppm are missing, unless REQUIRE_RENDER=1 (CI),
- * in which case a missing tool fails.
+ * Because the baselines belong to CI's image, the comparison is opt-in outside CI: it runs when
+ * REQUIRE_RENDER=1 (CI), CI=true, VISUAL_REGRESSION=1 or UPDATE_BASELINES=1 is set, and is skipped
+ * with a printed reason otherwise, so a local `pnpm test` with LibreOffice installed does not fail on
+ * font differences. Skips with a printed reason when soffice/pdftoppm are missing, unless
+ * REQUIRE_RENDER=1 (CI), in which case a missing tool fails.
  */
 
 import Highcharts from 'highcharts';
@@ -56,11 +59,16 @@ function which(bin: string): string | null {
 
 const SOFFICE = which('soffice') ?? which('libreoffice');
 const PDFTOPPM = which('pdftoppm');
+/** Outside CI the comparison is opt-in: the baselines are rendered on CI's image (see the header). */
+const OPTED_IN =
+  process.env.REQUIRE_RENDER === '1' || process.env.CI === 'true' || process.env.VISUAL_REGRESSION === '1' || UPDATE;
 const SKIP_REASON = !SOFFICE
   ? 'soffice/libreoffice not on PATH'
   : !PDFTOPPM
     ? 'pdftoppm (poppler-utils) not on PATH'
-    : null;
+    : !OPTED_IN
+      ? 'baselines are produced on the CI image (ubuntu-latest, apt LibreOffice and fonts); set VISUAL_REGRESSION=1 to compare locally'
+      : null;
 
 const CASES: ReadonlyArray<readonly [name: string, fixture: Options]> = [
   ['line', F.simpleLine],
@@ -229,7 +237,8 @@ if (SKIP_REASON !== null) {
       });
     });
   } else {
-    console.warn(`[visual-regression] skipped: ${SKIP_REASON} (set REQUIRE_RENDER=1 to make this a failure)`);
+    const hint = OPTED_IN ? 'set REQUIRE_RENDER=1 to make this a failure' : 'see the file header';
+    console.warn(`[visual-regression] skipped: ${SKIP_REASON} (${hint})`);
     describe('LibreOffice visual regression', () => {
       it.skip(`skipped: ${SKIP_REASON}`, () => {});
     });

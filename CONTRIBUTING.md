@@ -27,8 +27,11 @@ pnpm check            # typecheck + build + tests
 ```
 
 Optional tools: LibreOffice and poppler (`brew install --cask libreoffice && brew install poppler`)
-enable the render and visual-regression tests, which skip when the tools are missing; Playwright's
-Chromium (`pnpm exec playwright install chromium`) enables `pnpm test:e2e`.
+enable the render tests, which skip when the tools are missing. The visual-regression comparison
+(`tests/integration/visual-regression.test.ts`) stays skipped outside CI even with the tools
+installed, because its baselines are rendered on the CI image and other fonts fail the pixel limit;
+run it on purpose with `VISUAL_REGRESSION=1 pnpm test:visual`. Playwright's Chromium
+(`pnpm exec playwright install chromium`) enables `pnpm test:e2e`.
 
 ## Pull requests
 
