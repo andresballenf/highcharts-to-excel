@@ -1,6 +1,6 @@
 {
   "name": "highcharts-editable-excel",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Export Highcharts charts to XLSX workbooks containing native, editable Excel charts linked to worksheet data.",
   "license": "MIT",
   "author": {
