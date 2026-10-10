@@ -54,7 +54,8 @@ in LibreOffice", not "works in Excel".
 
 Releases are automated with [Changesets](https://github.com/changesets/changesets). Merging pull
 requests with changesets into `main` opens or refreshes a `chore: release` pull request; merging that
-pull request publishes to npm with provenance and creates the GitHub release.
+pull request publishes to npm through trusted publishing (OIDC, no stored token), with a provenance
+attestation, and creates the GitHub release and tag.
 
 ## Code of conduct
 

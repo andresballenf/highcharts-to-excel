@@ -1,8 +1,13 @@
 name: Release
 
 # Changesets flow: pushes to main open/refresh a "chore: release" PR that bumps the version and
-# CHANGELOG; merging that PR publishes to npm with provenance. No tag trigger (changeset publish
-# creates the tag itself, so a tag trigger would publish twice).
+# CHANGELOG; merging that PR publishes to npm. No tag trigger (changeset publish creates the tag
+# itself, so a tag trigger would publish twice).
+#
+# Publishing authenticates with npm trusted publishing (OIDC): the package's trusted publisher on
+# npmjs.com is this repository + this workflow file, so no npm token is stored in the repository.
+# npm generates the provenance attestation automatically. Requirements: `id-token: write`, a
+# GitHub-hosted runner, and npm >= 11.5.1 (pnpm publish shells out to `npm publish`).
 on:
   push:
     branches: [main]
@@ -10,7 +15,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  id-token: write # npm provenance
+  id-token: write # npm trusted publishing (OIDC) and provenance
 
 concurrency:
   group: release-${{ github.ref }}
@@ -28,17 +33,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-          registry-url: https://registry.npmjs.org
+          # No registry-url: it would write an .npmrc auth line; OIDC needs none. No cache in release builds.
+      - name: Update npm for trusted publishing (needs >= 11.5.1)
+        run: |
+          npm install -g npm@11
+          npm --version
       - run: pnpm install --frozen-lockfile
       - name: Create release PR or publish
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
-          version: pnpm run version
-          publish: pnpm release
-          title: 'chore: release'
-          commit: 'chore: release'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
+          version-script: pnpm run version
+          publish-script: pnpm release
+          pr-title: 'chore: release'
+          commit-message: 'chore: release'
