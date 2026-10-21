@@ -289,6 +289,19 @@ describe('audit fixes: alignment, label mode, duplicates, pre-1900 dates, doughn
     expect(l.diagnostics.find((x) => x.code === 'NULL_VALUES')!.message).toContain('empty cells');
   });
 
+  it('C1b: a series without any point stays blank instead of #N/A', () => {
+    const m = F.baseModel();
+    m.xAxes = [F.axis({ index: 0, kind: 'linear' })];
+    m.series = [
+      F.series({ kind: 'line', index: 0, points: [0, 1, 2].map((x) => F.point({ x, y: x })) }),
+      F.series({ kind: 'line', index: 1, name: 'Pending', points: [] }),
+    ];
+    const l = layoutOf(m);
+    for (const r of [1, 2, 3]) expect(cell(l.sheet, 2, r)).toBeUndefined();
+    expect(l.diagnostics.some((x) => x.code === 'UNALIGNED_X_VALUES')).toBe(false);
+    expect(l.diagnostics.some((x) => x.code === 'EMPTY_SERIES' && x.seriesIndex === 1)).toBe(true);
+  });
+
   it('C2: label mode never maps a numeric x onto a category by array position', () => {
     const m = F.baseModel();
     m.xAxes = [F.axis({ index: 0, kind: 'category', categories: ['A', 'B', 'C'] })];

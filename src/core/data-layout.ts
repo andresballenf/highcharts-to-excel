@@ -620,12 +620,12 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
         builder.set(helperCols[i]!, r + 1, { type: 'formula', formula: c.formula, cached: v }, style);
       });
     });
-    for (let r = 0; r < n; r++) {
+    // No point at this x: #N/A, like the other category series (an empty series stays blank).
+    for (let r = 0; r < n && s.points.length > 0; r++) {
       if (placed.filled[r] === 1) continue;
-      // No point at this x: #N/A, like the other category series.
       for (const col of [lowCol, highCol, ...helperCols]) builder.set(col, r + 1, { type: 'error', value: '#N/A' });
     }
-    reportSeriesData(s, pos, counters.nulls, counters.nonNumeric, placed.missing);
+    reportSeriesData(s, pos, counters.nulls, counters.nonNumeric, s.points.length > 0 ? placed.missing : 0);
     diagnostics.push(...checkLimits(0, 0, n, s.index).diagnostics);
     const baseCol = split ? helperCols[0]! : lowCol;
     const mainIdx = split ? 1 : 0;
@@ -811,13 +811,14 @@ export function buildDataLayout(model: ChartModel, plan: ChartTypeResolution, op
         cache[r] = v;
         if (v !== null) builder.set(col, r + 1, { type: 'number', value: v }, style);
       });
-      for (let r = 0; r < n; r++) {
+      // No point at this x (alignment gap, not a null point): #N/A, which line/area charts skip
+      // while connecting the neighbours. The chart cache keeps null for it. A series without any
+      // point has nothing to connect and stays blank.
+      for (let r = 0; r < n && s.points.length > 0; r++) {
         if (filled[r] === 1) continue;
-        // No point at this x (alignment gap, not a null point): #N/A, which line/area charts skip
-        // while connecting the neighbours. The chart cache keeps null for it.
         builder.set(col, r + 1, { type: 'error', value: '#N/A' });
       }
-      reportSeriesData(s, pos, counters.nulls, counters.nonNumeric, missing);
+      reportSeriesData(s, pos, counters.nulls, counters.nonNumeric, s.points.length > 0 ? missing : 0);
       const lim = checkLimits(0, 0, n, s.index);
       diagnostics.push(...lim.diagnostics);
       const range: SeriesRange = {

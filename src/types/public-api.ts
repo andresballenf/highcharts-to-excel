@@ -134,6 +134,16 @@ export interface ExportOptions {
    * for side-by-side comparison. Browser only; requires the Highcharts exporting module. Default false.
    */
   includeReferenceImage?: boolean;
+  /**
+   * Infer Excel number formats from what the chart displays when it has no declarative format:
+   * rendered axis tick labels and data labels, and the tooltip text the chart would show (the
+   * chart's `tooltip.formatter` or the series `pointFormatter` is called on up to 8 points per
+   * series, without changing the chart). This is how `labels.formatter` / `tooltip.formatter`
+   * output such as "$12.5K" or "45.3%" reaches the axes and the data sheet. Live charts only.
+   * Set false to translate format strings and `valueDecimals`/`valuePrefix`/`valueSuffix` only and
+   * never call formatter callbacks. Default true.
+   */
+  inferFormats?: boolean;
   /** Include the normalized ChartModel in the result (for debugging). Default false. */
   includeModel?: boolean;
   hooks?: ExportHooks;
@@ -397,6 +407,11 @@ function checkString(options: Record<string, unknown>, property: string): void {
   if (v !== undefined && typeof v !== 'string') throw invalid(property, 'a string', v);
 }
 
+function checkBoolean(options: Record<string, unknown>, property: string): void {
+  const v = options[property];
+  if (v !== undefined && typeof v !== 'boolean') throw invalid(property, 'a boolean', v);
+}
+
 function checkFunction(value: unknown, property: string): void {
   if (value !== undefined && typeof value !== 'function') throw invalid(property, 'a function', value);
 }
@@ -427,6 +442,7 @@ function validateExportOptions(options: unknown): asserts options is ExportOptio
   checkString(o, 'chartSheetName');
   checkString(o, 'dataSheetName');
   checkString(o, 'filename');
+  checkBoolean(o, 'inferFormats');
   checkFunction(o.onWarning, 'onWarning');
   if (o.hooks !== undefined) {
     if (typeof o.hooks !== 'object' || o.hooks === null) throw invalid('hooks', 'an object', o.hooks);
@@ -459,6 +475,7 @@ export function resolveExportOptions(
     | 'strictMode'
     | 'includeReferenceImage'
     | 'includeModel'
+    | 'inferFormats'
   >
 > &
   ExportOptions {
@@ -474,5 +491,6 @@ export function resolveExportOptions(
     strictMode: options.strictMode ?? false,
     includeReferenceImage: options.includeReferenceImage ?? false,
     includeModel: options.includeModel ?? false,
+    inferFormats: options.inferFormats ?? true,
   };
 }

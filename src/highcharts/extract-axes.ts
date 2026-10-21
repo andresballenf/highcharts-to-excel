@@ -9,6 +9,7 @@ import { strokeFromOptions } from '../translators/style-translator';
 import { parseColor } from '../utils/colors';
 import { fontFor, borderStroke, langSeparators } from './extract-styles';
 import { arr, num, plainText, rec, str } from './guards';
+import { inferredFormat, sampleAxisLabels } from './sample-formats';
 import type { AxisView, ChartView, ExtractContext, HcAxisLike } from './types';
 
 /** Navigator / scrollbar / other internal axes (Highcharts Stock). */
@@ -91,7 +92,21 @@ function extractAxis(ctx: ExtractContext, axis: AxisView): AxisModel {
     property: `${axis.path}.labels`,
     ...langSeparators(view),
   });
-  diagnostics.addAll(translated.diagnostics);
+  let labelFormat = translated.format;
+  let labelDiagnostics = translated.diagnostics;
+  // Formatter callbacks and Highcharts' default labels ("5k") have no format string: read the
+  // rendered tick labels instead. Only value axes; category and datetime labels are not numbers.
+  if ((kind === 'linear' || kind === 'logarithmic') && labelFormat?.kind !== 'excel' && labels.enabled !== false) {
+    const userFormatter = typeof userLabels.formatter === 'function';
+    const inferred = inferredFormat(ctx, () => sampleAxisLabels(axis), `${axis.path}.labels`, 'axis labels', {
+      plainFormats: userFormatter,
+    });
+    if (inferred) {
+      labelFormat = inferred;
+      labelDiagnostics = labelDiagnostics.filter((d) => d.code !== 'UNSUPPORTED_FORMATTER');
+    }
+  }
+  diagnostics.addAll(labelDiagnostics);
 
   // Datetime x bounds move to the displayed wall-clock time, like the point x values. Date strings
   // (Highcharts 12+) are already wall-clock times.
@@ -163,7 +178,7 @@ function extractAxis(ctx: ExtractContext, axis: AxisView): AxisModel {
     labels: {
       enabled: labels.enabled !== false,
       font: fontFor(view, 'axisLabels', labels.style),
-      format: translated.format,
+      format: labelFormat,
       rotation: num(labels.rotation) ?? 0,
     },
     min,

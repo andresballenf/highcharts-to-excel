@@ -89,7 +89,8 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | `title.text`, `title.style` | native | none | Also written to cell A1 of the chart sheet. |
 | `subtitle.text`, `subtitle.style` | approximated | `APPROXIMATED_LAYOUT` *(info)* | Second title paragraph in its own font (size, weight and color from the subtitle style). Used as the title when there is none. LibreOffice draws the whole title in the first paragraph's style; Excel honours per-paragraph fonts. |
 | `annotations` | unsupported | `UNSUPPORTED_ANNOTATION` | |
-| `tooltip.formatter`, `tooltip.pointFormatter`, `series[i].tooltip.*Formatter` | unsupported | `UNSUPPORTED_TOOLTIP` *(info)* | Tooltips are never exported. |
+| `tooltip.formatter`, `tooltip.pointFormatter`, `series[i].tooltip.*Formatter` | unsupported (tooltip) / approximated (value format) | `UNSUPPORTED_TOOLTIP` *(info)*; `APPROXIMATED_NUMBER_FORMAT` *(info)*, property `series[i].tooltip` | Tooltips are never exported. Live charts (`inferFormats`, default on): the formatter is called on up to 8 points per series and the way it writes the value (currency, `k`/`M`/`B`, percent, decimals, grouping) becomes the number format of the series' data cells. Shared tooltips get `this.points`; Highcharts 11 gets the label config, as on hover. |
+| `tooltip.pointFormat`, `series[i].tooltip.pointFormat` | native / approximated | `UNSUPPORTED_NUMBER_FORMAT` / `APPROXIMATED_NUMBER_FORMAT` | The value token (`{point.y:,.2f}`) and the text glued to it become the data cells' number format. |
 | `tooltip.valueDecimals`, `valuePrefix`, `valueSuffix` | native | `UNSUPPORTED_NUMBER_FORMAT` / `APPROXIMATED_NUMBER_FORMAT` when not representable | Become the number format of the series' data cells. |
 
 ## Series styling
@@ -118,7 +119,7 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | --- | --- | --- | --- |
 | `series[i].dataLabels.enabled` | native | none | Per-point `data[j].dataLabels.enabled: false` hides single labels. |
 | `dataLabels.format` (`{y}`, `{point.name}`, `{series.name}`, `{percentage}`, `{y:.1f}`…) | native / approximated | `APPROXIMATED_DATA_LABELS`, `UNSUPPORTED_NUMBER_FORMAT` | Mapped to show value, category, series name and percent plus an Excel number format. Literal text between parts becomes Excel's separator. Percentages show only on pie/doughnut; elsewhere a percentage-only label shows the value instead. |
-| `dataLabels.formatter` | unsupported | `UNSUPPORTED_FORMATTER` | Excel shows the raw value. |
+| `dataLabels.formatter` | approximated / unsupported | `APPROXIMATED_NUMBER_FORMAT` *(info)*; else `UNSUPPORTED_FORMATTER` | Live charts (not pies): the number format is inferred from the rendered labels and also formats the data cells when the tooltip gives none. Otherwise Excel shows the raw value. |
 | `dataLabels.align/verticalAlign/inside/distance` | native / approximated | `APPROXIMATED_DATA_LABELS` | Mapped to an Excel position. Positions that the Excel chart type does not allow use the default. Outside end on stacked bars becomes inside end. Area, doughnut and radar cannot be positioned *(info)*. |
 | `dataLabels.style`, `backgroundColor`, `borderColor/Width` | native | `APPROXIMATED_FONT` for generic families | |
 
@@ -148,7 +149,8 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | `visible: false`, `labels.enabled: false` | native | none | Axis deleted, or labels hidden. |
 | `labels.rotation` | native | none | Clamped to ±90°. |
 | `labels.format` | native / approximated / unsupported | `APPROXIMATED_NUMBER_FORMAT`, `UNSUPPORTED_NUMBER_FORMAT` | Excel number or date format. Literal text around category and datetime labels is dropped. |
-| `labels.formatter` | unsupported | `UNSUPPORTED_FORMATTER` | Excel default format. |
+| `labels.formatter` (value axes) | approximated / unsupported | `APPROXIMATED_NUMBER_FORMAT` *(info)*; else `UNSUPPORTED_FORMATTER` | Live charts: the number format is inferred from the rendered tick labels (`$5K` → `$#,##0,"K"`). Options objects, or labels that do not contain the tick value: Excel default format. A non-scaling axis format also formats the cells of series without a format of their own. |
+| default value-axis labels (`10k`) | approximated | `APPROXIMATED_NUMBER_FORMAT` *(info)* | Live charts: Highcharts' `lang.numericSymbols` shortening becomes a scaled format (`#,##0,"k"`). Plain numbers keep Excel's General. |
 | `title.text`, `title.style`, `labels.style` | native | `APPROXIMATED_FONT` | |
 | `gridLineWidth/Color/DashStyle`, `minorGridLine*` | native | none | |
 | `lineWidth/lineColor`, `tickWidth` | native | none | |
@@ -165,6 +167,7 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | `legend.floating` | native | none | Overlay. |
 | `legend.reversed` | unsupported | `UNSUPPORTED_STYLE` *(info)* | |
 | `series[i].showInLegend: false` | native | none | Legend entry deleted (`c:legendEntry`); not for pie slices. |
+| `legend.labelFormatter`, `legend.labelFormat` | native | none | The series name in Excel (legend, data sheet header) is the text the legend renders, so a formatter that shows `custom.label` instead of `series.name` is honoured. Options objects: a `labelFormat` template (`{name}`, `{userOptions.custom.label}`) is applied; a `labelFormatter` is not called. |
 | `legend.itemStyle`, `backgroundColor`, `borderColor/Width` | native | `APPROXIMATED_FONT` | |
 
 ## Fonts and numbers
@@ -193,7 +196,8 @@ Tested with Highcharts 12.6.2 and 13.1.1 in Node 22 + jsdom, Chromium (Playwrigh
 | x between or beyond the categories of a category axis (e.g. `x: 0.5`, `x: -1`) | approximated | `UNALIGNED_X_VALUES` | Each such x becomes its own category row; never mapped onto a category by position. |
 | two points of one series at the same x | approximated | `UNALIGNED_X_VALUES` | The first point is kept; the repeats stay out of the chart (`details.duplicates`). |
 | non-numeric values / unknown point shapes | approximated | `NON_NUMERIC_VALUE` | Skipped or left empty, never guessed. Reported once per series (`details.count`, `details.firstIndices`); per-point data-label diagnostics are aggregated the same way. |
-| empty series | translated | `EMPTY_SERIES` *(info)* | |
+| empty series | translated | `EMPTY_SERIES` *(info)* | Blank cells (no `#N/A`). |
+| series with no values that is unnamed or has `showInLegend: false` (spacers, placeholders) | translated | `EMPTY_SERIES` *(info)*, `details.excluded: true` | Not exported: no data column, no chart series, no legend entry. |
 | no series or no data | blocking | `EMPTY_CHART` | |
 | more than 1,048,576 rows / 16,384 columns | blocking | `ROW_LIMIT_EXCEEDED` / `COLUMN_LIMIT_EXCEEDED` | |
 | more than 32,000 points in one series | approximated (non-blocking) | `ROW_LIMIT_EXCEEDED` | Exported anyway. 32,000 was the Excel 2007 per-series cap; Excel 2010+ is memory-bound. Older Excel versions may truncate the series or render it slowly. |

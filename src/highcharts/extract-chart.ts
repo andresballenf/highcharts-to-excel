@@ -30,6 +30,7 @@ import {
   isHighchartsChart,
   isRealBrowser,
   num,
+  plainText,
   rec,
   str,
   type Rec,
@@ -49,6 +50,8 @@ export interface ExtractOptions {
    * consulted before the browser's computed styles, so styled-mode charts resolve headless too.
    */
   cssVariables?: Readonly<Record<string, string>>;
+  /** Infer number formats from rendered labels and tooltips (`ExportOptions.inferFormats`). Default true. */
+  inferFormats?: boolean;
 }
 
 /** Highcharts' default marker symbol cycle (`chart.options.symbols`). */
@@ -176,7 +179,11 @@ function viewFromChart(chart: HcChartLike, extract: ExtractOptions): ChartView {
       index,
       path: `series[${index}]`,
       type,
-      name: str(s.name) ?? str(sOpts.name) ?? `Series ${index + 1}`,
+      name:
+        legendName(s, rec(get(opts, 'legend')), rec(get(userOpts, 'legend'))) ??
+        str(s.name) ??
+        str(sOpts.name) ??
+        `Series ${index + 1}`,
       visible: s.visible !== false,
       opts: sOpts,
       userOpts: deepMerge(get(userOpts, 'plotOptions', 'series'), get(userOpts, 'plotOptions', type), s.userOptions),
@@ -194,6 +201,48 @@ function viewFromChart(chart: HcChartLike, extract: ExtractOptions): ChartView {
     };
   });
   return view;
+}
+
+/**
+ * The series name as the legend shows it, when that differs from `series.name`: the rendered
+ * legend label, else the developer's `legend.labelFormatter` (live charts) or `legend.labelFormat`.
+ * Null when the legend says nothing beyond the name.
+ */
+function legendName(
+  rt: HcSeriesLike | undefined,
+  legend: Rec | undefined,
+  userLegend: Rec | undefined,
+  raw?: Rec,
+): string | null {
+  const clean = (x: unknown): string | null => {
+    const t = plainText(x);
+    return t === null ? null : t.replace(/\s*\n\s*/g, ' ');
+  };
+  const rendered = rt?.legendItem?.label?.textStr;
+  if (typeof rendered === 'string') return clean(rendered);
+  const labelFormat = str(userLegend?.labelFormat) ?? str(legend?.labelFormat);
+  if (labelFormat !== undefined) return clean(simpleFormat(labelFormat, rt ?? raw));
+  const formatter = userLegend?.labelFormatter;
+  if (rt && typeof formatter === 'function') {
+    try {
+      return clean((formatter as (this: unknown) => unknown).call(rt));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** `{path}` substitution for name templates (`{name}`, `{userOptions.custom.label}`); null if a path is missing. */
+function simpleFormat(template: string, ctx: unknown): string | null {
+  let missing = false;
+  const out = template.replace(/\{([^{}:]+)(?::[^{}]*)?\}/g, (_, path: string) => {
+    const v = get(ctx, ...path.trim().split('.'));
+    if (typeof v === 'string' || typeof v === 'number') return String(v);
+    missing = true;
+    return '';
+  });
+  return missing ? null : out;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +300,7 @@ function viewFromOptions(options: Rec, extract: ExtractOptions): ChartView {
   view.yAxes = axisViews('y', axisList(options.yAxis));
 
   const plotOptions = rec(options.plotOptions) ?? {};
+  const legend = rec(options.legend);
   let colorCounter = 0;
   let symbolCounter = 0;
   view.series = rawSeries.map((raw, index): SeriesView => {
@@ -273,7 +323,10 @@ function viewFromOptions(options: Rec, extract: ExtractOptions): ChartView {
       index,
       path: `series[${index}]`,
       type,
-      name: str(merged.name) ?? `Series ${index + 1}`,
+      name:
+        legendName(undefined, legend, legend, { name: merged.name, index, options: merged, userOptions: raw }) ??
+        str(merged.name) ??
+        `Series ${index + 1}`,
       visible: merged.visible !== false,
       opts: merged,
       userOpts: merged,
@@ -291,6 +344,22 @@ function viewFromOptions(options: Rec, extract: ExtractOptions): ChartView {
 // ---------------------------------------------------------------------------
 // Shared model assembly
 // ---------------------------------------------------------------------------
+
+/**
+ * Series without a value format of their own take their y axis label format when the developer
+ * set one (a format string or a formatter whose output was inferred), unless it scales the values
+ * ("$5K"), which would hide the cell's precision.
+ */
+function fillValueFormatsFromAxes(series: SeriesModel[], yAxes: AxisModel[]): void {
+  for (const s of series) {
+    if (s.yFormat !== null || s.kind === 'pie' || s.kind === 'doughnut') continue;
+    const f = yAxes[s.yAxisIndex]?.labels.format;
+    if (f?.kind !== 'excel' || f.source === undefined || f.code === 'General') continue;
+    const firstSection = (f.code.replace(/"[^"]*"/g, '').split(';')[0] ?? '').trim();
+    if (/[0#],(?![0#])/.test(firstSection)) continue;
+    s.yFormat = f;
+  }
+}
 
 /** Fills missing data extremes from the extracted points of the visible series bound to the axis. */
 function fillExtremesFromPoints(axes: AxisModel[], series: SeriesModel[], which: 'x' | 'y'): void {
@@ -401,12 +470,14 @@ function buildModel(
     dataMode: extract.dataMode,
     seriesVisibility: extract.seriesVisibility,
     time,
+    inferFormats: extract.inferFormats !== false,
   };
 
   const styles = extractChartStyles(view, diagnostics);
   const xAxes = extractAxes(ctx, 'x');
   const yAxes = extractAxes(ctx, 'y');
   const series = extractSeries(ctx);
+  fillValueFormatsFromAxes(series, yAxes);
   fillExtremesFromPoints(xAxes, series, 'x');
   fillExtremesFromPoints(yAxes, series, 'y');
   chartLevelDiagnostics(view, view.series, diagnostics);

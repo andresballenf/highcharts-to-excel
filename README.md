@@ -291,6 +291,7 @@ Constants: `XLSX_MIME_TYPE`, `DEFAULT_MENU_TEXT` (`"Download editable Excel char
 | `chartWidth`, `chartHeight` | `number` (CSS px) | Rendered size (`chart.chartWidth`/`chartHeight`; options path: `chart.width`/`height`, else 600×400) | Size of the Excel chart object: a finite number from 50 to 20000, otherwise `INVALID_OPTIONS`. |
 | `strictMode` | `boolean` | `false` | Also throw `CHART_NOT_EDITABLE` when any diagnostic has outcome `unsupported` at `warning` or `error` severity (for example annotations, plot bands, formatter callbacks). Blocking diagnostics always throw, with or without strict mode. Reference-image diagnostics are ignored. |
 | `includeReferenceImage` | `boolean` | `false` | Opt-in. Embeds a PNG of the Highcharts rendering to the right of the native chart for side-by-side comparison. Needs a real browser and `chart.getSVG` (exporting module). Otherwise the export continues without it and reports `WRITER_LIMITATION`. |
+| `inferFormats` | `boolean` | `true` | Live charts: when an axis, data label or tooltip has no format string, the Excel number format is inferred from what the chart shows. Axis tick labels and data labels are read as rendered; tooltip text is produced by calling the chart's `tooltip.formatter` (or the series `pointFormatter`/`pointFormat`) on up to 8 points per series, with a context object, without changing the chart. Currency prefixes and suffixes, `k`/`M`/`B` scaling, percentages, decimals and thousands grouping are recognised (`APPROXIMATED_NUMBER_FORMAT`, info, names the code and an example). `false`: only format strings and `valueDecimals`/`valuePrefix`/`valueSuffix` are translated and no callback is called. See [Number formats](#number-formats). |
 | `includeModel` | `boolean` | `false` | Adds the normalized `ChartModel` to `result.model` (debugging). |
 | `hooks` | `{ transformModel?: (model: ChartModel) => ChartModel }` | none | Called after extraction, before theme overrides and translation. Must return a model with a `series` array (otherwise `INVALID_OPTIONS`). Never mutate the Highcharts chart in it. |
 | `properties` | `{ title?: string; creator?: string }` | Title is the chart title. Creator is `"highcharts-editable-excel"`. | Workbook document properties. |
@@ -417,7 +418,7 @@ interface Diagnostic {
 | Code | Thrown when |
 | --- | --- |
 | `INVALID_CHART` | The argument is not a rendered chart (it needs `series`, `xAxis` and `yAxis` arrays, `options`, and `renderTo` or `container`). |
-| `INVALID_OPTIONS` | An `ExportOptions` value is invalid (unknown `fidelity`/`dataMode`/`seriesVisibility`, `chartWidth`/`chartHeight` not a finite number from 50 to 20000, a non-string sheet name or filename, a non-function `onWarning` or `hooks.transformModel`, a `writer` without `write`); `details.property` names the option. Also: `installHighchartsExcelExport` did not get a Highcharts namespace; `exportHighchartsOptionsToXlsx` did not get an object; `hooks.transformModel` returned something that is not a model; `exportChartsToWorkbook` got an empty or invalid list. |
+| `INVALID_OPTIONS` | An `ExportOptions` value is invalid (unknown `fidelity`/`dataMode`/`seriesVisibility`, `chartWidth`/`chartHeight` not a finite number from 50 to 20000, a non-string sheet name or filename, a non-function `onWarning` or `hooks.transformModel`, a non-boolean `inferFormats`, a `writer` without `write`); `details.property` names the option. Also: `installHighchartsExcelExport` did not get a Highcharts namespace; `exportHighchartsOptionsToXlsx` did not get an object; `hooks.transformModel` returned something that is not a model; `exportChartsToWorkbook` got an empty or invalid list. |
 | `CHART_NOT_EDITABLE` | Any **blocking** diagnostic: polar columns/bars (or another polar type without a radar form), no series or no data, only unsupported series types, pie or bubble combined with other types, or worksheet row or column limit exceeded. In strict mode, also any `unsupported` warning. `details.diagnostics` lists the causes. |
 | `EXPORTING_MODULE_MISSING` | `installHighchartsExcelExport` was called before `highcharts/modules/exporting` was loaded. |
 | `BROWSER_REQUIRED` | `triggerDownload` or `downloadHighchartsAsXlsx` ran outside a browser. |
@@ -505,7 +506,7 @@ Combination rules (`resolveChartType`):
 | Reversed / opposite axes | native | Excel axis orientation and crossing (including reversed horizontal bars). |
 | Axis min/max, tickInterval, minorTickInterval, label rotation | native | On value axes. On category axes min/max are ignored (`APPROXIMATED_AXIS_SCALE`, info). |
 | Axis and data-label `format` strings | native / approximated | Translated to Excel number formats where representable (`UNSUPPORTED_NUMBER_FORMAT`, `APPROXIMATED_NUMBER_FORMAT`). |
-| `formatter` callbacks | unsupported | Never executed (`UNSUPPORTED_FORMATTER`). |
+| `formatter` callbacks | approximated / unsupported | Live charts: the number format is inferred from the rendered axis and data labels and from the tooltip text (`APPROXIMATED_NUMBER_FORMAT`, info; see `inferFormats`). Text a number format cannot carry (category names, words) is not reproduced. Options objects, or output that does not contain the value: `UNSUPPORTED_FORMATTER`. |
 | Data labels | native / approximated | Value, category name, series name and percentage, with font, background and border. Positions Excel does not allow for the chart type fall back to Excel's default (`APPROXIMATED_DATA_LABELS`). |
 | Legend | native / approximated | Positions top, bottom, left, right and top-right are native. Top-left, bottom-left and bottom-right become top or bottom (`APPROXIMATED_LEGEND_POSITION`). `floating` becomes an overlay. `reversed` is unsupported. |
 | Gradients | native / approximated | Linear gradients are native (angle from the gradient vector). Radial gradients become top-to-bottom linear (`UNSUPPORTED_GRADIENT`). Patterns are unsupported (`UNRESOLVED_COLOR`). |
@@ -521,7 +522,9 @@ Combination rules (`resolveChartType`):
 | Range series (`columnrange`, `arearange`) | approximated | A stacked column/area with a hidden base series (`APPROXIMATED_CHART_TYPE`, info). The data sheet has `<name> Low`, `<name> High` and a `<name> Range` column of formulas `=High−Low`, so editing Low/High updates the chart. Column ranges crossing zero use `Base`/`Up`/`Down` formula columns (`MAX`/`MIN`) instead. One range series per chart type and axis; range data labels are not exported. |
 | Annotations | unsupported | `UNSUPPORTED_ANNOTATION`. |
 | Plot bands / plot lines | unsupported | `UNSUPPORTED_PLOT_BAND`. |
-| Tooltips | unsupported | Never exported. Custom formatters are reported (`UNSUPPORTED_TOOLTIP`, info). `tooltip.valueDecimals`/`valuePrefix`/`valueSuffix` become the data cells' number format. |
+| Tooltips | unsupported | Never exported. Custom formatters are reported (`UNSUPPORTED_TOOLTIP`, info). The way a tooltip writes the value becomes the data cells' number format (see [Number formats](#number-formats)). |
+| Series names | native | The name the legend shows: the rendered legend label (so `legend.labelFormatter`/`labelFormat` win over `series.name`); options objects apply a `legend.labelFormat` template such as `{userOptions.custom.label}`. |
+| Spacer / placeholder series | translated | A series with no values that is unnamed or has `showInLegend: false` (gap fillers between column groups, placeholders) is left out of the chart and the data sheet (`EMPTY_SERIES`, info, `details.excluded: true`). A named empty series that the legend lists is kept, with blank cells. |
 
 Per-option detail (option path, outcome, diagnostic) is in [docs/compatibility.md](docs/compatibility.md).
 
@@ -592,6 +595,20 @@ const brandOptions: ExportOptions = {
   properties: { title: 'Sales report', creator: 'ACME BI' },
 };
 ```
+
+### Number formats
+
+Every value on the data sheet, each value axis and each data label gets the Excel number format closest to what the chart shows. Sources, first match wins:
+
+| Target | Sources |
+| --- | --- |
+| Data cells of a series | 1. the tooltip text (live chart, configured tooltip: `tooltip.formatter`, `pointFormatter`, `pointFormat`, `valueDecimals`…); 2. the tooltip `pointFormat` string and `valueDecimals`/`valuePrefix`/`valueSuffix`; 3. the data label format; 4. the y axis label format when the developer set one and it does not scale the values (`$12K` would hide the cell's precision). |
+| Value axis | `labels.format`, else the rendered tick labels: a `labels.formatter`, or Highcharts' default thousands shortening (`10k` → `#,##0,"k"`). |
+| Data labels | `dataLabels.format`, else the rendered labels of a `dataLabels.formatter` (not pies). |
+
+Inference matches each rendered text to its value, then keeps the pattern most samples share: `$12,500.50` → `$#,##0.00`, `$5K` → `$#,##0,"K"`, `1.2M` → `#,##0.0,,"M"`, `45.3%` for 0.453 → `0.0%`, `45.3%` for 45.3 → `#,##0.0"%"`, `1.234,50 €` (`lang.decimalPoint: ','`) → `#,##0.00 €`. A zero drawn without the affixes (`0` next to `$5K`) gets its own section. When the samples disagree, or the text does not contain the value, nothing is inferred and the earlier behaviour applies. Each inferred format is reported as `APPROXIMATED_NUMBER_FORMAT` (info) with the code and an example in `details`. Excel always shows its viewer's locale separators.
+
+Inference needs a live chart and calls tooltip formatters on a few sample points (Highcharts calls them on every hover). They must not have side effects; turn it off with `inferFormats: false`. To force a format, set `labels.format`, `tooltip.valueDecimals`/`valuePrefix`/`valueSuffix`, or change `series[i].yFormat` / `yAxes[i].labels.format` in `hooks.transformModel`.
 
 ### Reading warnings
 

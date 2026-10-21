@@ -196,6 +196,7 @@ function prepareModel(source: Source, resolved: ResolvedOptions, collector: Diag
   const extract = {
     dataMode: resolved.dataMode,
     seriesVisibility: resolved.seriesVisibility,
+    inferFormats: resolved.inferFormats,
     diagnostics: collector,
     ...(resolved.chartWidth !== undefined ? { chartWidth: resolved.chartWidth } : {}),
     ...(resolved.chartHeight !== undefined ? { chartHeight: resolved.chartHeight } : {}),
