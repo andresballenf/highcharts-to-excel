@@ -40,7 +40,7 @@ export function escapeExcelLiteral(text: string): string {
 }
 
 /** Escapes affix text: bare-safe characters at the edges stay bare, the rest is quoted. */
-function escapeAffix(text: string): string {
+export function escapeAffix(text: string): string {
   if (!text) return '';
   const chars = [...text];
   let first = -1;
@@ -83,7 +83,7 @@ const SERIES_EXPRS = new Set(['series.name']);
 const SEPARATOR_ONLY = /^[\s:;,|\-/()[\]]*$/;
 const FLOAT_SPEC = /^(,)?(?:\.(\d+))?f$/;
 
-function stripHtml(s: string): string {
+export function stripHtml(s: string): string {
   return s
     .replace(/<br\s*\/?>/gi, ' ')
     .replace(/<[^>]*>/g, '')

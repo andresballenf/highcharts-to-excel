@@ -35,6 +35,13 @@ export interface HcPointLike {
   visible?: boolean;
   options?: unknown;
   graphic?: HcWrapperLike;
+  /** Rendered data label(s). */
+  dataLabel?: HcWrapperLike;
+  dataLabels?: HcWrapperLike[];
+  /** Highcharts 11: the tooltip formatter context. */
+  getLabelConfig?: () => Record<string, unknown>;
+  /** Formats `pointFormat` for this point (valueDecimals/prefix/suffix applied). */
+  tooltipFormatter?: (pointFormat: string) => string;
 }
 
 export interface HcExtremes {
@@ -62,6 +69,9 @@ export interface HcAxisLike {
   userMin?: number | null;
   userMax?: number | null;
   getExtremes?: () => HcExtremes;
+  /** Rendered tick positions and their labels. */
+  tickPositions?: number[];
+  ticks?: Record<string, { label?: HcWrapperLike } | undefined>;
 }
 
 export interface HcSeriesLike {
@@ -95,6 +105,8 @@ export interface HcSeriesLike {
   graph?: HcWrapperLike;
   area?: HcWrapperLike;
   getColumn?: (name: string, processed?: boolean) => ArrayLike<unknown> | undefined;
+  /** The rendered legend entry (Highcharts 11+). */
+  legendItem?: { label?: HcWrapperLike };
 }
 
 export interface HcLegendLike {
@@ -129,6 +141,8 @@ export interface HcChartLike {
   renderer?: { style?: Record<string, unknown> };
   /** `Highcharts.Time` instance (`getTimezoneOffset`, `dateFormat`). */
   time?: unknown;
+  /** The Tooltip instance (passed to tooltip formatters). */
+  tooltip?: unknown;
 }
 
 /** A plain (JSON-like) Highcharts options object as supplied by a developer. */
@@ -202,4 +216,6 @@ export interface ExtractContext {
   seriesVisibility: SeriesVisibilityMode;
   /** Moves datetime x values to the wall-clock time the chart displays. */
   time: DatetimeShifter;
+  /** Infer number formats from rendered labels and tooltip text (`ExportOptions.inferFormats`). */
+  inferFormats: boolean;
 }

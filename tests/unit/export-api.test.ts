@@ -323,6 +323,7 @@ describe('resolveExportOptions validation (A2)', () => {
     ['hooks', { hooks: 'nope' }],
     ['hooks.transformModel', { hooks: { transformModel: 1 } }],
     ['writer', { writer: {} }],
+    ['inferFormats', { inferFormats: 'yes' }],
   ])('rejects an invalid %s', (name, bad) => {
     let error: unknown;
     try {
@@ -359,6 +360,7 @@ describe('resolveExportOptions validation (A2)', () => {
       }),
     ).not.toThrow();
     expect(resolveExportOptions().fidelity).toBe('best-effort');
+    expect(resolveExportOptions().inferFormats).toBe(true);
   });
 
   it('export entry points reject invalid options with INVALID_OPTIONS', async () => {
@@ -542,5 +544,59 @@ describe('cancellation, progress and timings (Highcharts 13)', () => {
     );
     expect(error.cause).toBe('too late');
     expect(click).not.toHaveBeenCalled();
+  });
+});
+
+describe('display fidelity end to end', () => {
+  afterEach(() => destroyAll());
+
+  it('writes legend names, skips spacer series and carries tooltip and axis formats into the workbook', async () => {
+    const money = (v: number): string => `$${v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+    const chart = render({
+      chart: { type: 'column' },
+      xAxis: { categories: ['Jan', 'Feb', 'Mar'] },
+      yAxis: {
+        labels: {
+          formatter(this: { value: number }): string {
+            return `$${this.value / 1000}K`;
+          },
+        },
+      },
+      legend: {
+        labelFormatter(this: { name: string; userOptions: { custom?: { label?: string } } }): string {
+          return this.userOptions.custom?.label ?? this.name;
+        },
+      },
+      tooltip: {
+        formatter(this: { y: number; series: { name: string } }): string {
+          return `${this.series.name}: <b>${money(this.y)}</b>`;
+        },
+      },
+      series: [
+        {
+          type: 'column',
+          name: 'perf dashboard 4 trends',
+          custom: { label: 'Performance' },
+          data: [12500.5, 23000, 18000],
+        },
+        { type: 'column', showInLegend: false, data: [] },
+        { type: 'column', name: 'Previous period', data: [11000, 21000, 17000.25] },
+      ],
+    } as unknown as Parameters<typeof renderChart>[1]);
+    const r = await exportHighchartsToXlsx(chart);
+    const x = await inspectXlsx(r.bytes);
+    const data = x.sheetPath('Data');
+    expect([x.cellValue(data, 'B1'), x.cellValue(data, 'C1'), x.cellValue(data, 'D1')]).toEqual([
+      'Performance',
+      'Previous period',
+      null,
+    ]);
+    const chartXml = x.chartXml(0);
+    expect(x.seriesFormulas(x.chartPaths()[0]!)).toHaveLength(2);
+    expect(chartXml).toContain('formatCode="$#,##0,&quot;K&quot;"');
+    const styles = x.text('xl/styles.xml');
+    expect(styles).toContain('formatCode="$#,##0.00"');
+    // The value cells use that style (not the default style 0).
+    expect(x.cellXml(data, 'B2')).toMatch(/ s="[1-9]\d*"/);
   });
 });

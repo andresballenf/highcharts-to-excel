@@ -26,6 +26,7 @@ import { readEffectiveStyle } from './css-resolver';
 import { axisCategories, axisKind } from './extract-axes';
 import { borderStroke, fillAt, fontFor, langSeparators, seriesShowsInLegend } from './extract-styles';
 import { arr, bool, deepMerge, firstRec, get, num, rec, str, type Rec } from './guards';
+import { inferredFormat, sampleDataLabels, sampleTooltip } from './sample-formats';
 import { isBarLike, isPieLike, isRangePointKind, kindOf, styledColorCount } from './series-types';
 import type { ChartView, ExtractContext, HcPointLike, HcSeriesLike, SeriesView } from './types';
 
@@ -245,6 +246,16 @@ function seriesDataLabels(ctx: ExtractContext, s: SeriesView, kind: SeriesKind, 
     property: `${s.path}.dataLabels`,
     ...langSeparators(view),
   });
+  if (formatter !== undefined && !isPie) {
+    // A formatter callback: infer the format from the labels it rendered.
+    const inferred = inferredFormat(ctx, () => sampleDataLabels(s), `${s.path}.dataLabels.formatter`, 'data labels', {
+      seriesIndex: s.index,
+    });
+    if (inferred) {
+      diagnostics.addAll(t.diagnostics.filter((d) => d.code !== 'UNSUPPORTED_FORMATTER'));
+      return { ...base, format: inferred, showValue: true };
+    }
+  }
   diagnostics.addAll(t.diagnostics);
   return {
     ...base,
@@ -256,22 +267,59 @@ function seriesDataLabels(ctx: ExtractContext, s: SeriesView, kind: SeriesKind, 
   };
 }
 
-function seriesYFormat(ctx: ExtractContext, s: SeriesView): NumberFormat | null {
+/** Tooltip options that change how a value is written. */
+const TOOLTIP_FORMAT_KEYS = [
+  'formatter',
+  'format',
+  'pointFormat',
+  'pointFormatter',
+  'valueDecimals',
+  'valuePrefix',
+  'valueSuffix',
+];
+
+/**
+ * Number format of the series values (data sheet cells), from what the chart shows for a value:
+ * the tooltip text (inferred on a live chart), else the tooltip `pointFormat` / `valueDecimals` /
+ * `valuePrefix` / `valueSuffix`, else the data label format. The y axis format is the caller's
+ * last fallback (`fillValueFormatsFromAxes`).
+ */
+function seriesYFormat(ctx: ExtractContext, s: SeriesView, dataLabels: DataLabelStyle): NumberFormat | null {
+  // Highcharts' default tooltip shows plain numbers; only a configured one says more than General.
+  const configured = TOOLTIP_FORMAT_KEYS.some(
+    (k) => get(ctx.view.userOpts, 'tooltip', k) !== undefined || get(s.userOpts, 'tooltip', k) !== undefined,
+  );
+  const inferred = inferredFormat(ctx, () => sampleTooltip(ctx.view, s), `${s.path}.tooltip`, 'tooltip', {
+    seriesIndex: s.index,
+    plainFormats: configured,
+  });
+  if (inferred) return inferred;
+
   const tooltip = rec(s.rt?.tooltipOptions) ?? deepMerge(ctx.view.opts.tooltip, s.opts.tooltip);
   const valueDecimals = num(tooltip.valueDecimals);
   const valuePrefix = str(tooltip.valuePrefix);
   const valueSuffix = str(tooltip.valueSuffix);
-  if (valueDecimals === undefined && valuePrefix === undefined && valueSuffix === undefined) return null;
-  const t = translateFormatString(undefined, undefined, {
-    kind: 'value',
-    property: `${s.path}.tooltip`,
-    ...langSeparators(ctx.view),
-    ...(valueDecimals !== undefined ? { valueDecimals } : {}),
-    ...(valuePrefix !== undefined ? { valuePrefix } : {}),
-    ...(valueSuffix !== undefined ? { valueSuffix } : {}),
-  });
-  ctx.diagnostics.addAll(t.diagnostics);
-  return t.format;
+  // Only a developer-supplied pointFormat says something about the value (the default is `{point.y}`).
+  const pointFormat =
+    str(get(s.userOpts, 'tooltip', 'pointFormat')) ?? str(get(ctx.view.userOpts, 'tooltip', 'pointFormat'));
+  if (valueDecimals !== undefined || valuePrefix !== undefined || valueSuffix !== undefined || pointFormat) {
+    const t = translateFormatString(pointFormat, undefined, {
+      kind: pointFormat ? 'tooltip' : 'value',
+      property: `${s.path}.tooltip`,
+      ...langSeparators(ctx.view),
+      ...(valueDecimals !== undefined ? { valueDecimals } : {}),
+      ...(valuePrefix !== undefined ? { valuePrefix } : {}),
+      ...(valueSuffix !== undefined ? { valueSuffix } : {}),
+    });
+    ctx.diagnostics.addAll(t.diagnostics);
+    if (t.format?.kind === 'excel' && t.format.code !== 'General') return t.format;
+  }
+
+  const dl = dataLabels.format;
+  if (dataLabels.enabled && dataLabels.showValue && !dataLabels.showPercentage && dl?.kind === 'excel') {
+    if (dl.code !== 'General') return dl;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -973,13 +1021,7 @@ function extractOne(ctx: ExtractContext, s: SeriesView): SeriesModel {
     );
   }
 
-  if (points.length === 0) {
-    diagnostics.report('EMPTY_SERIES', 'translated', `${s.path}.data`, `Series "${s.name}" has no data points.`, {
-      severity: 'info',
-      seriesIndex: s.index,
-    });
-  }
-
+  const dataLabels = seriesDataLabels(ctx, s, kind, stacking);
   return {
     id: str(o.id) ?? `series-${s.index}`,
     index: s.index,
@@ -998,13 +1040,13 @@ function extractOne(ctx: ExtractContext, s: SeriesView): SeriesModel {
     fillOpacity,
     border,
     marker: seriesMarker(view, s, kind, color, points.length),
-    dataLabels: seriesDataLabels(ctx, s, kind, stacking),
+    dataLabels,
     smooth: kind === 'spline' || kind === 'areaspline',
     bars,
     pie: isPie
       ? { innerSize: pieInnerSize(view, s), startAngle: num(o.startAngle) ?? 0, endAngle: num(o.endAngle) ?? null }
       : null,
-    yFormat: seriesYFormat(ctx, s),
+    yFormat: seriesYFormat(ctx, s, dataLabels),
     points,
     dataSemantics: semantics,
     ...(linked !== null ? { linkedTo: linked } : {}),
@@ -1062,7 +1104,34 @@ export function extractSeries(ctx: ExtractContext): SeriesModel[] {
         },
       );
     }
-    out.push(extractOne(ctx, s));
+    const model = extractOne(ctx, s);
+    if (!hasValues(model)) {
+      // Placeholder series (no name, or kept out of the legend) that never draw anything, such as
+      // spacers between column groups, would only add an empty "Series N" column and legend entry.
+      const spacer = !model.showInLegend || !userNamed(s);
+      if (spacer || model.points.length === 0) {
+        ctx.diagnostics.report(
+          'EMPTY_SERIES',
+          'translated',
+          `${s.path}.data`,
+          spacer
+            ? `Series "${s.name}" has no values and no legend entry of its own; it is not exported.`
+            : `Series "${s.name}" has no data points.`,
+          { severity: 'info', seriesIndex: s.index, ...(spacer ? { details: { excluded: true } } : {}) },
+        );
+      }
+      if (spacer) continue;
+    }
+    out.push(model);
   }
   return out;
+}
+
+function hasValues(s: SeriesModel): boolean {
+  return s.points.some((p) => p.y !== null || (p.low ?? null) !== null || (p.high ?? null) !== null);
+}
+
+function userNamed(s: SeriesView): boolean {
+  const name = s.userOpts.name;
+  return typeof name === 'string' && name.trim() !== '';
 }

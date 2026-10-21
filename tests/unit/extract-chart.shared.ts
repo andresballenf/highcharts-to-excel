@@ -439,7 +439,7 @@ export function runExtractorSuite(Highcharts: HighchartsLike, label: string): vo
         yAxis: { plotBands: [{ from: 1, to: 2 }] },
         annotations: [{ labels: [{ point: { x: 0, y: 0 }, text: 'x' }] }],
       };
-      const { model } = extract(fixture as unknown as Parameters<typeof renderChart>[1]);
+      const { model } = extract(fixture as unknown as Parameters<typeof renderChart>[1], { inferFormats: false });
       expect(called).toBe(false);
       const props = model.warnings.map((w) => `${w.code}@${w.property}`);
       expect(props).toEqual(
@@ -663,7 +663,7 @@ export function runExtractorSuite(Highcharts: HighchartsLike, label: string): vo
       ]);
       expect(codes(m)).not.toContain('DATA_MODE_FALLBACK');
       expect(codes(m)).not.toContain('EMPTY_CHART');
-      const odd = extractChartModelFromOptions({ series: [{ data: [1, 2] }, { data: 'nope' }] }, opts());
+      const odd = extractChartModelFromOptions({ series: [{ data: [1, 2] }, { name: 'Odd', data: 'nope' }] }, opts());
       expect(odd.warnings.some((w) => /rendered points/.test(w.message))).toBe(false);
       expect(odd.series[1]!.dataSemantics.mode).toBe('raw');
     });
@@ -855,6 +855,136 @@ export function runExtractorSuite(Highcharts: HighchartsLike, label: string): vo
       const partial = extract(F.styledMode, { cssVariables: { '--highcharts-color-0': '#8e44ad' } }).model;
       expect(partial.series.map((s) => hex(s.color))).toEqual(['#8e44ad', '#544fc5']);
       expect(codes(partial)).toContain('STYLED_MODE_FALLBACK');
+    });
+  });
+  describe(`display fidelity: names, spacer series, inferred number formats (${label})`, () => {
+    afterEach(() => destroyAll());
+    const money = (v: number, d = 2): string =>
+      `${v < 0 ? '-' : ''}$${Math.abs(v)
+        .toFixed(d)
+        .replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+    type Ctx = { y: number; series: { name: string; userOptions: { custom?: { label?: string } } } };
+    const labelOf = (p: Ctx): string => p.series.userOptions.custom?.label ?? p.series.name;
+
+    const dashboard = (): Parameters<typeof renderChart>[1] =>
+      ({
+        chart: { type: 'column' },
+        xAxis: { categories: ['Jan', 'Feb', 'Mar'] },
+        yAxis: {
+          labels: {
+            formatter(this: { value: number }): string {
+              return `$${this.value / 1000}K`;
+            },
+          },
+        },
+        legend: {
+          labelFormatter(this: { name: string; userOptions: { custom?: { label?: string } } }): string {
+            return this.userOptions.custom?.label ?? this.name;
+          },
+        },
+        tooltip: {
+          shared: true,
+          formatter(this: { points?: Ctx[] } & Ctx): string {
+            return (this.points ?? [this]).map((p) => `${labelOf(p)}: <b>${money(p.y)}</b>`).join('<br/>');
+          },
+        },
+        series: [
+          { name: 'performance dashboard 4 trends', custom: { label: 'Performance' }, data: [12500.5, 23000, 18000] },
+          { name: 'Previous period', data: [11000, 21000, 17000.25] },
+          { showInLegend: false, data: [] },
+          { type: 'line', name: 'Mainstream', data: [9000, 9500, 9900] },
+          { showInLegend: false, enableMouseTracking: false, data: [null, null, null] },
+          { name: 'Pending', data: [] },
+        ],
+      }) as unknown as Parameters<typeof renderChart>[1];
+
+    it('uses the legend label as the series name and drops spacer series', () => {
+      const { model } = extract(dashboard());
+      expect(model.series.map((s) => s.name)).toEqual(['Performance', 'Previous period', 'Mainstream', 'Pending']);
+      const excluded = model.warnings.filter((w) => w.code === 'EMPTY_SERIES' && w.details?.excluded === true);
+      expect(excluded.map((w) => w.seriesIndex)).toEqual([2, 4]);
+      // A named, legend-visible empty series stays (Highcharts lists it in the legend).
+      expect(model.series[3]!.points).toEqual([]);
+    });
+
+    it('infers value formats from a shared tooltip formatter and axis labels from a label formatter', () => {
+      const { chart, model } = extract(dashboard());
+      expect(model.series.slice(0, 3).map((s) => s.yFormat)).toEqual(
+        Array(3).fill({ kind: 'excel', code: '$#,##0.00', source: 'inferred from tooltip' }),
+      );
+      expect(model.yAxes[0]!.labels.format).toEqual({
+        kind: 'excel',
+        code: '$#,##0,"K"',
+        source: 'inferred from axis labels',
+      });
+      expect(codes(model)).not.toContain('UNSUPPORTED_FORMATTER');
+      // The chart is left as it was: no `points` left on the sampled point.
+      expect(chart.series[0].points[0].points).toBeUndefined();
+    });
+
+    it('never calls formatters with inferFormats: false', () => {
+      let calls = 0;
+      const fixture = dashboard() as { tooltip: { formatter: (...a: unknown[]) => string } };
+      const original = fixture.tooltip.formatter;
+      fixture.tooltip.formatter = function (this: unknown, ...a: unknown[]) {
+        calls++;
+        return original.apply(this, a);
+      };
+      const before = calls;
+      const { model } = extract(fixture as unknown as Parameters<typeof renderChart>[1], { inferFormats: false });
+      expect(calls).toBe(before);
+      expect(model.series[0]!.yFormat).toBeNull();
+      expect(model.yAxes[0]!.labels.format?.kind).toBe('unsupported');
+    });
+
+    it('reads pointFormat strings, default k labels and data label formatters', () => {
+      const { model } = extract({
+        yAxis: {},
+        series: [
+          {
+            type: 'line',
+            name: 'Share',
+            tooltip: { pointFormat: '{series.name}: <b>{point.y:,.1f}%</b>' },
+            data: [45.25, 12.5, 30],
+          },
+          {
+            type: 'column',
+            name: 'Revenue',
+            yAxis: 0,
+            dataLabels: {
+              enabled: true,
+              formatter(this: { y: number }): string {
+                return money(this.y, 0);
+              },
+            },
+            data: [12000, 48000, 31000],
+          },
+        ],
+      } as unknown as Parameters<typeof renderChart>[1]);
+      expect(model.series[0]!.yFormat).toMatchObject({ code: '#,##0.0"%"' });
+      expect(model.series[1]!.dataLabels?.format).toMatchObject({ kind: 'excel', code: '$#,##0' });
+      // The data label format also formats the values on the data sheet.
+      expect(model.series[1]!.yFormat).toMatchObject({ code: '$#,##0' });
+      // Highcharts' default labels shorten thousands ("10k"); a scaled axis format stays off the cells.
+      expect(model.yAxes[0]!.labels.format).toMatchObject({ code: '#,##0,"k";-#,##0,"k";0' });
+
+      const fromOptions = extractChartModelFromOptions(
+        {
+          legend: { labelFormat: '{userOptions.custom.label}' },
+          series: [
+            {
+              name: 'Share',
+              custom: { label: 'Market share' },
+              tooltip: { pointFormat: '{series.name}: <b>{point.y:,.1f}%</b>' },
+              data: [45.25, 12.5],
+            },
+            { data: [] },
+          ],
+        },
+        opts(),
+      );
+      expect(fromOptions.series.map((s) => s.name)).toEqual(['Market share']);
+      expect(fromOptions.series[0]!.yFormat).toMatchObject({ code: '#,##0.0"%"' });
     });
   });
 }
